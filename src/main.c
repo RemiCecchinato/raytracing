@@ -3,6 +3,11 @@
 #include <stdlib.h>
 #include <stdint.h>
 #include <stdbool.h>
+#include <pthread.h>
+
+#if !defined(USE_THREADS)
+    #define USE_THREADS 0
+#endif
 
 #define STB_IMAGE_WRITE_IMPLEMENTATION
 #include "stb_image_write.h"
@@ -26,6 +31,7 @@ Image3f create_blank_image(uint32_t width, uint32_t height)
     uint32_t bpp = sizeof(*image.r) * 3;
 
     float *memory = calloc(pixel_count, bpp);
+
     if (!memory) return image;
 
     image.size.width  = width;
@@ -124,9 +130,9 @@ void raytrace_ray(Job *job, Vec2i pixel_coord, Vec3f direction)
         Image3f *image = job->image;
         Material *material = scene->materials + material_id;
 
-        Vec3f light_position = {-10000.0, -5000.0f, 0.0f};
+        Vec3f light_position = {-10000.0, -5000.0f, 1000.0f};
         Vec3f light_color = {1.0f, 1.0f, 1.0f};
-        float intensity = 1e9f;
+        float intensity = 1.5e9f;
 
         Vec3f light_path = sub3f(intersection_point, light_position);
         Vec3f light_direction = normalize(light_path);
@@ -135,7 +141,8 @@ void raytrace_ray(Job *job, Vec2i pixel_coord, Vec3f direction)
         float power = intensity / (4.0f * M_PI * dist2);
 
         Vec3f max_light_direction = add3f(light_direction, scale3f(surface_normal, - 2 * dot3f(surface_normal, light_direction)));
-        float scale = - dot3f(max_light_direction, direction);
+        // float scale = - dot3f(max_light_direction, direction);
+        float scale = - dot3f(light_direction, surface_normal);
         if (scale < 0) scale = 0;
 
         Vec3f final_light_color = scale3f(light_color, power * scale);
@@ -221,8 +228,8 @@ int main()
 
     Plane planes[] = {
         {
-            .normal = {1.0f, 0.0f, 0.0f},
-            .d = 10.0f,
+            .normal = {-1.0f, 0.0f, 0.0f},
+            .d = -10000.0f,
             .material_id = 1,
         }
     };
@@ -245,16 +252,49 @@ int main()
         .planes = planes,
     };
 
-    Job job = {
-        .scene = &scene,
-        .image = &dest_image,
-        .region = {
-            .point = {0.0f, 0.0f},
-            .size = {width, height},
-        },
-    };
+    
+    if(USE_THREADS) {
+        pthread_t threads[16] = {};
+        Job jobs[16] = {};
 
-    raytrace_region(&job);
+        uint32_t block_width = width / 4;
+        uint32_t block_height = height / 4;
+
+        for (int i = 0; i < 4; i++) {
+            for (int j = 0; j < 4; j++) {
+                jobs[4 * i + j].scene = &scene;
+                jobs[4 * i + j].image = &dest_image;
+                jobs[4 * i + j].region = (Rect2i){
+                    .point = {i * block_width, j * block_height},
+                    .size = {block_width, block_height}
+                };
+
+                int code = pthread_create(&threads[4 * i + j], NULL, (void*)(void*)raytrace_region, &jobs[4 * i + j]);
+                if (0 != code) {
+                    printf("Error creating thread.\n");
+                    exit(-1);
+                }
+            }
+        }
+
+        for (int i = 0; i < 16; i++) {
+            pthread_join(threads[i], NULL);
+        }
+
+    } else {
+        Job job = {
+            .scene = &scene,
+            .image = &dest_image,
+            .region = {
+                .point = {0, 0},
+                .size = {width, height},
+            },
+        };
+
+        raytrace_region(&job);
+    }
+
+    
 
     save_image("image.png", &dest_image);
 
