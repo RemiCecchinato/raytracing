@@ -167,11 +167,6 @@ void raytrace_region(Job *job)
     Vec3f pixel_right = scale3f(camera_right, sinf(fov_h * 0.5f) / (float)image->size.width * 2);
     Vec3f pixel_up    = scale3f(camera_up, sinf(fov_v * 0.5f) / (float)image->size.height * 2);
 
-#if 0
-    float fov_h = camera->field_of_view / (float)image->size.width;
-    float fov_v = (float)image->size.height / (float)image->size.width * fov_h;
-#endif
-
     Vec2f pixel_center = {
         .x = (float)image->size.width / 2,
         .y = (float)image->size.height / 2,
@@ -182,13 +177,6 @@ void raytrace_region(Job *job)
             Vec2i pixel_coord = {.x = x, .y = y};
 
             Vec2f pixel_coord_f = {.x = (float)x, .y = (float)y};
-#if 0
-            float angle_h = fov_h * (pixel_coord_f.x - pixel_center.x);
-            float angle_v = fov_v * (pixel_coord_f.y - pixel_center.y);
-
-            float scale_h = sinf(angle_h / 180.0f * M_PI);
-            float scale_v = sinf(angle_v / 180.0f * M_PI);
-#endif
 
             Vec3f direction = camera_direction;
             direction = add3f(direction, scale3f(pixel_right, pixel_coord_f.x - pixel_center.x));
