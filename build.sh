@@ -1,5 +1,5 @@
 #!/bin/bash
 
-DEBUG="-Og -g"
+DEBUG="-g3"
 
 gcc src/main.c -o main -lm $DEBUG

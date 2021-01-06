@@ -6,9 +6,11 @@
 
 #define STB_IMAGE_WRITE_IMPLEMENTATION
 #include "stb_image_write.h"
- 
+
+#if 0
 #define STB_IMAGE_IMPLEMENTATION
 #include "stb_image.h"
+#endif
 
 // Mes headers
 #include "main.h"
@@ -45,9 +47,9 @@ bool save_image(char *filename, Image3f *image)
     uint8_t *pixel = pixels;
     for (int j = 0; j < image->size.height; j++) {
         for (int i = 0; i < image->size.width; i++) {
-            *pixel++ = (uint8_t)(image->r[j * image->size.width + i] * 255.0f);
-            *pixel++ = (uint8_t)(image->g[j * image->size.width + i] * 255.0f);
-            *pixel++ = (uint8_t)(image->b[j * image->size.width + i] * 255.0f);
+            *pixel++ = (uint8_t)MIN(image->r[j * image->size.width + i] * 255.0f, 255.0f);
+            *pixel++ = (uint8_t)MIN(image->g[j * image->size.width + i] * 255.0f, 255.0f);
+            *pixel++ = (uint8_t)MIN(image->b[j * image->size.width + i] * 255.0f, 255.0f);
         }
     }
 
@@ -122,9 +124,25 @@ void raytrace_ray(Job *job, Vec2i pixel_coord, Vec3f direction)
         Image3f *image = job->image;
         Material *material = scene->materials + material_id;
 
-        image->r[image->size.width * pixel_coord.y + pixel_coord.x] = material->color.r;
-        image->g[image->size.width * pixel_coord.y + pixel_coord.x] = material->color.g;
-        image->b[image->size.width * pixel_coord.y + pixel_coord.x] = material->color.b;
+        Vec3f light_position = {-10000.0, -5000.0f, 0.0f};
+        Vec3f light_color = {1.0f, 1.0f, 1.0f};
+        float intensity = 1e9f;
+
+        Vec3f light_path = sub3f(intersection_point, light_position);
+        Vec3f light_direction = normalize(light_path);
+
+        float dist2 = norm2(light_path);
+        float power = intensity / (4.0f * M_PI * dist2);
+
+        Vec3f max_light_direction = add3f(light_direction, scale3f(surface_normal, - 2 * dot3f(surface_normal, light_direction)));
+        float scale = - dot3f(max_light_direction, direction);
+        if (scale < 0) scale = 0;
+
+        Vec3f final_light_color = scale3f(light_color, power * scale);
+
+        image->r[image->size.width * pixel_coord.y + pixel_coord.x] = material->color.r * final_light_color.r;
+        image->g[image->size.width * pixel_coord.y + pixel_coord.x] = material->color.g * final_light_color.g;
+        image->b[image->size.width * pixel_coord.y + pixel_coord.x] = material->color.b * final_light_color.b;
     }
 }
 
@@ -143,8 +161,16 @@ void raytrace_region(Job *job)
     Vec3f camera_up = normalize(camera->up);
     Vec3f camera_right = cross3f(camera_up, camera_direction);
 
+    float fov_h = camera->field_of_view;
+    float fov_v = (float)image->size.height / (float)image->size.width * fov_h;
+
+    Vec3f pixel_right = scale3f(camera_right, sinf(fov_h * 0.5f) / (float)image->size.width * 2);
+    Vec3f pixel_up    = scale3f(camera_up, sinf(fov_v * 0.5f) / (float)image->size.height * 2);
+
+#if 0
     float fov_h = camera->field_of_view / (float)image->size.width;
     float fov_v = (float)image->size.height / (float)image->size.width * fov_h;
+#endif
 
     Vec2f pixel_center = {
         .x = (float)image->size.width / 2,
@@ -156,15 +182,17 @@ void raytrace_region(Job *job)
             Vec2i pixel_coord = {.x = x, .y = y};
 
             Vec2f pixel_coord_f = {.x = (float)x, .y = (float)y};
+#if 0
             float angle_h = fov_h * (pixel_coord_f.x - pixel_center.x);
             float angle_v = fov_v * (pixel_coord_f.y - pixel_center.y);
 
             float scale_h = sinf(angle_h / 180.0f * M_PI);
             float scale_v = sinf(angle_v / 180.0f * M_PI);
+#endif
 
             Vec3f direction = camera_direction;
-            direction = add3f(direction, scale3f(camera_right, scale_h));
-            direction = add3f(direction, scale3f(camera_up, scale_v));
+            direction = add3f(direction, scale3f(pixel_right, pixel_coord_f.x - pixel_center.x));
+            direction = add3f(direction, scale3f(pixel_up,  -(pixel_coord_f.y - pixel_center.y)));
             direction = normalize(direction);
 
             raytrace_ray(job, pixel_coord, direction);
@@ -184,7 +212,10 @@ int main()
         },
         {
             .color = {1.0f, 1.0f, 1.0f},
-        }
+        },
+        {
+            .color = {0.0f, 1.0f, 0.0f},
+        },
     };
 
     Sphere spheres[] = {
@@ -193,19 +224,24 @@ int main()
             .radius = 1.0f,
             .material_id = 0,
         },
+        {
+            .center = {1.0f, 2.0f, 0.5f},
+            .radius = 0.7f,
+            .material_id = 2,
+        }
     };
 
     Plane planes[] = {
         {
             .normal = {1.0f, 0.0f, 0.0f},
-            .d = 1000.0f,
+            .d = 10.0f,
             .material_id = 1,
         }
     };
 
     Scene scene = {
         .camera = {
-            .position = {-5.0f, 0.0f, 0.0f},
+            .position = {-3.0f, 0.0f, 0.0f},
             .lookAt = {0.0f, 0.0f, 0.0f},
             .up = {0.0f, 0.0f, 1.0f},
             .field_of_view = 90,
