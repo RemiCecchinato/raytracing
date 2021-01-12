@@ -28,17 +28,16 @@ Image3f create_blank_image(uint32_t width, uint32_t height)
     Image3f image = {};
 
     uint32_t pixel_count = width * height;
-    uint32_t bpp = sizeof(*image.r) * 3;
+    uint32_t bpp = sizeof(*image.pixels);
 
-    float *memory = calloc(pixel_count, bpp);
+    // @Leak
+    Vec3f *memory = (Vec3f*)((uint64_t)(calloc(pixel_count * bpp + 64, 1) + 63) & ~64LL);
 
     if (!memory) return image;
 
     image.size.width  = width;
     image.size.height = height;
-    image.r = memory;
-    image.g = memory + pixel_count;
-    image.b = memory + 2 * pixel_count;
+    image.pixels = memory;
 
     return image;
 };
@@ -53,9 +52,12 @@ bool save_image(char *filename, Image3f *image)
     uint8_t *pixel = pixels;
     for (int j = 0; j < image->size.height; j++) {
         for (int i = 0; i < image->size.width; i++) {
-            *pixel++ = (uint8_t)MIN(image->r[j * image->size.width + i] * 255.0f, 255.0f);
-            *pixel++ = (uint8_t)MIN(image->g[j * image->size.width + i] * 255.0f, 255.0f);
-            *pixel++ = (uint8_t)MIN(image->b[j * image->size.width + i] * 255.0f, 255.0f);
+            Vec3f pixel_color = min3f(image->pixels[j * image->size.width + i], (Vec3f){1.0f, 1.0f, 1.0f});
+            pixel_color = scale3f(pixel_color, 255.0f);
+
+            *pixel++ = (uint8_t)pixel_color.r;
+            *pixel++ = (uint8_t)pixel_color.g;
+            *pixel++ = (uint8_t)pixel_color.b;
         }
     }
 
@@ -66,9 +68,8 @@ bool save_image(char *filename, Image3f *image)
     return true;
 }
 
-void raytrace_ray(Job *job, Vec2i pixel_coord, Vec3f direction)
+void raytrace_ray(Scene *scene, Ray *ray)
 {
-    Scene *scene = job->scene;
     Camera *camera = &scene->camera;
 
     float t_min = FLT_MAX;
@@ -83,7 +84,7 @@ void raytrace_ray(Job *job, Vec2i pixel_coord, Vec3f direction)
         Vec3f OC = sub3f(camera->position, sphere->center);
 
         // On calcule un determinant réduit qui évite les multiplications par 4 puis les divions par 4
-        float b = dot3f(direction, OC);
+        float b = dot3f(ray->direction, OC);
         float c = norm2(OC) - sphere->radius * sphere->radius;
 
         float det = b * b - c;
@@ -105,7 +106,7 @@ void raytrace_ray(Job *job, Vec2i pixel_coord, Vec3f direction)
         t_min = t;
         material_id = sphere->material_id;
 
-        intersection_point = add3f(camera->position, scale3f(direction, t));
+        intersection_point = add3f(camera->position, scale3f(ray->direction, t));
         surface_normal = normalize(sub3f(intersection_point, sphere->center));
     }
 
@@ -113,7 +114,7 @@ void raytrace_ray(Job *job, Vec2i pixel_coord, Vec3f direction)
     for (int i = 0; i < scene->plane_count; i++) {
         Plane *plane = scene->planes + i;
 
-        float t = (plane->d - dot3f(camera->position, plane->normal)) / dot3f(direction, plane->normal);
+        float t = (plane->d - dot3f(camera->position, plane->normal)) / dot3f(ray->direction, plane->normal);
 
         if (t < 0) continue;
 
@@ -122,12 +123,11 @@ void raytrace_ray(Job *job, Vec2i pixel_coord, Vec3f direction)
         t_min = t;
         material_id = plane->material_id;
 
-        intersection_point = add3f(camera->position, scale3f(direction, t));
+        intersection_point = add3f(camera->position, scale3f(ray->direction, t));
         surface_normal = plane->normal;
     }
 
     if (material_id != -1) {
-        Image3f *image = job->image;
         Material *material = scene->materials + material_id;
 
         Vec3f light_position = {-10000.0, -5000.0f, 1000.0f};
@@ -147,9 +147,7 @@ void raytrace_ray(Job *job, Vec2i pixel_coord, Vec3f direction)
 
         Vec3f final_light_color = scale3f(light_color, power * scale);
 
-        image->r[image->size.width * pixel_coord.y + pixel_coord.x] = material->color.r * final_light_color.r;
-        image->g[image->size.width * pixel_coord.y + pixel_coord.x] = material->color.g * final_light_color.g;
-        image->b[image->size.width * pixel_coord.y + pixel_coord.x] = material->color.b * final_light_color.b;
+        ray->color = mul3f(final_light_color, material->color);
     }
 }
 
@@ -190,7 +188,17 @@ void raytrace_region(Job *job)
             direction = add3f(direction, scale3f(pixel_up,  -(pixel_coord_f.y - pixel_center.y)));
             direction = normalize(direction);
 
-            raytrace_ray(job, pixel_coord, direction);
+            Ray ray = {
+                .origin = camera->position,
+                .direction = direction,
+
+                .color = {},
+                .hit_count = 0,
+            };
+
+            raytrace_ray(scene, &ray);
+
+            image->pixels[image->size.width * pixel_coord.y + pixel_coord.x] = ray.color;
         }
     }
 }
@@ -252,7 +260,6 @@ int main()
         .planes = planes,
     };
 
-    
     if(USE_THREADS) {
         pthread_t threads[16] = {};
         Job jobs[16] = {};
@@ -269,7 +276,7 @@ int main()
                     .size = {block_width, block_height}
                 };
 
-                int code = pthread_create(&threads[4 * i + j], NULL, (void*)(void*)raytrace_region, &jobs[4 * i + j]);
+                int code = pthread_create(&threads[4 * i + j], NULL, (void*)raytrace_region, &jobs[4 * i + j]);
                 if (0 != code) {
                     printf("Error creating thread.\n");
                     exit(-1);
@@ -280,7 +287,6 @@ int main()
         for (int i = 0; i < 16; i++) {
             pthread_join(threads[i], NULL);
         }
-
     } else {
         Job job = {
             .scene = &scene,
@@ -293,8 +299,6 @@ int main()
 
         raytrace_region(&job);
     }
-
-    
 
     save_image("image.png", &dest_image);
 

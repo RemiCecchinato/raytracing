@@ -17,6 +17,15 @@ typedef struct Scene
     Plane   *planes;
 } Scene;
 
+typedef struct Ray
+{
+    Vec3f origin;
+    Vec3f direction;
+
+    Vec3f color;
+    uint32_t hit_count;
+} Ray;
+
 typedef struct Job
 {
     Scene   *scene;

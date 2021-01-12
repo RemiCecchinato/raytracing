@@ -62,9 +62,7 @@ typedef struct Camera
 typedef struct Image3f
 {
     Vec2i  size;
-    float *r;
-    float *g;
-    float *b;
+    Vec3f *pixels;
 } Image3f;
 
 typedef struct Material

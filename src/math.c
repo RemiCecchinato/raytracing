@@ -62,6 +62,28 @@ Vec3f sub3f(Vec3f left, Vec3f right)
     return result;
 }
 
+Vec3f mul3f(Vec3f left, Vec3f right)
+{
+    Vec3f result = {
+        .x = left.x * right.x,
+        .y = left.y * right.y,
+        .z = left.z * right.z,
+    };
+
+    return result;
+}
+
+Vec3f min3f(Vec3f left, Vec3f right)
+{
+    Vec3f result = {
+        .x = MIN(left.x, right.x),
+        .y = MIN(left.y, right.y),
+        .z = MIN(left.z, right.z),
+    };
+
+    return result;
+}
+
 Vec3f cross3f(Vec3f left, Vec3f right)
 {
     Vec3f result = {
