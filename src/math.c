@@ -29,7 +29,6 @@ float norm(Vec3f vec)
 Vec3f normalize(Vec3f vec)
 {
     float vec_norm = norm(vec);
-    float one_over_norm = 1.0f / vec_norm;
 
     Vec3f result = {
         .x = vec.x / vec_norm,

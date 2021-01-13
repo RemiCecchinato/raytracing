@@ -74,7 +74,13 @@ typedef struct Light
 
 typedef struct Material
 {
-    Vec3f color;
+    // reflection information
+    Vec3f diffuse_color;
+    Vec3f mirror_color;
+
+    // transparancy information
+    bool transparent;
+    float n;
 } Material;
 
 typedef struct Sphere
@@ -90,5 +96,11 @@ typedef struct Plane
     float d;
     int32_t material_id;
 } Plane;
+
+const Vec3f BLACK = {0.0f, 0.0f, 0.0f};
+const Vec3f WHITE = {1.0f, 1.0f, 1.0f};
+const Vec3f RED   = {1.0f, 0.0f, 0.0f};
+const Vec3f GREEN = {0.0f, 1.0f, 0.0f};
+const Vec3f BLUE  = {0.0f, 0.0f, 1.0f};
 
 #endif

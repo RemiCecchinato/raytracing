@@ -21,9 +21,6 @@ typedef struct Ray
 {
     Vec3f origin;
     Vec3f direction;
-
-    Vec3f color;
-    uint32_t hit_count;
 } Ray;
 
 typedef struct Ray_Result
@@ -34,6 +31,8 @@ typedef struct Ray_Result
     Vec3f intersection_point;
     Vec3f surface_normal;
     float t_min;
+
+    bool enter_shape;
 
     // infos graphiques
     int32_t material_id;

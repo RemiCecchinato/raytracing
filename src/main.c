@@ -52,7 +52,7 @@ bool save_image(char *filename, Image3f *image)
     uint8_t *pixel = pixels;
     for (int j = 0; j < image->size.height; j++) {
         for (int i = 0; i < image->size.width; i++) {
-            Vec3f pixel_color = min3f(image->pixels[j * image->size.width + i], (Vec3f){1.0f, 1.0f, 1.0f});
+            Vec3f pixel_color = min3f(image->pixels[j * image->size.width + i], (Vec3f)WHITE);
             pixel_color = pow3f(pixel_color, 1.0f / 2.2f);
             pixel_color = scale3f(pixel_color, 255.0f);
 
@@ -69,15 +69,17 @@ bool save_image(char *filename, Image3f *image)
     return true;
 }
 
-Ray_Result find_ray_hit(Scene *scene, Ray *ray)
+Ray_Result find_ray_hit(Scene *scene, Ray ray)
 {
-    Camera *camera = &scene->camera;
-
     Ray_Result result = {
         .hit = false,
+
         .intersection_point = {},
         .surface_normal = {},
         .t_min = FLT_MAX,
+        
+        .enter_shape = false,
+        
         .material_id = -1,
     };
 
@@ -85,10 +87,10 @@ Ray_Result find_ray_hit(Scene *scene, Ray *ray)
     for (int i = 0; i < scene->sphere_count; i++) {
         Sphere *sphere = scene->spheres + i;
 
-        Vec3f OC = sub3f(camera->position, sphere->center);
+        Vec3f OC = sub3f(ray.origin, sphere->center);
 
         // On calcule un determinant réduit qui évite les multiplications par 4 puis les divions par 4
-        float b = dot3f(ray->direction, OC);
+        float b = dot3f(ray.direction, OC);
         float c = norm2(OC) - sphere->radius * sphere->radius;
 
         float det = b * b - c;
@@ -102,16 +104,21 @@ Ray_Result find_ray_hit(Scene *scene, Ray *ray)
         
         // si t < 0, alors on est à l'intérieur de la sphère (bizard ...)
         // donc on prends le second point, plus loin
-        if (t < 0.0f) t = -b + sqrt_det;
+        if (t < 1e-3) {
+            t = -b + sqrt_det;
+        } else {
+            result.enter_shape = true;
+        }
 
         // On est pas la sphère la plus proche
         if (t > result.t_min) continue;
+        if (t < 1e-3) continue;
 
         result.hit = true;
         result.t_min = t;
         result.material_id = sphere->material_id;
 
-        result.intersection_point = add3f(camera->position, scale3f(ray->direction, t));
+        result.intersection_point = add3f(ray.origin, scale3f(ray.direction, t));
         result.surface_normal = normalize(sub3f(result.intersection_point, sphere->center));
     }
 
@@ -119,9 +126,9 @@ Ray_Result find_ray_hit(Scene *scene, Ray *ray)
     for (int i = 0; i < scene->plane_count; i++) {
         Plane *plane = scene->planes + i;
 
-        float t = (plane->d - dot3f(camera->position, plane->normal)) / dot3f(ray->direction, plane->normal);
+        float t = (plane->d - dot3f(ray.origin, plane->normal)) / dot3f(ray.direction, plane->normal);
 
-        if (t < 0) continue;
+        if (t < 1e-3) continue;
 
         if (t > result.t_min) continue;
 
@@ -129,24 +136,31 @@ Ray_Result find_ray_hit(Scene *scene, Ray *ray)
         result.t_min = t;
         result.material_id = plane->material_id;
 
-        result.intersection_point = add3f(camera->position, scale3f(ray->direction, t));
+        result.intersection_point = add3f(ray.origin, scale3f(ray.direction, t));
         result.surface_normal = plane->normal;
     }
 
     return result;
 }
 
-void raytrace_ray(Scene *scene, Ray *ray)
+Vec3f raytrace_ray(Scene *scene, Ray ray)
 {
     Camera *camera = &scene->camera;
+    
+    Vec3f color_scale = WHITE;
+    Vec3f accumulated_color = BLACK;
 
-    Ray_Result ray_result = find_ray_hit(scene, ray);
+    for (int ray_count = 0; ray_count < 64; ray_count++) {
+        Ray_Result ray_result = find_ray_hit(scene, ray);
 
-    if (ray_result.hit) {
+        if (!ray_result.hit) break;
+
+        Material *material = scene->materials + ray_result.material_id;
+
         Light light = {
-            .position = {-10000.0, -5000.0f, 1000.0f},
-            .color = {1.0f, 1.0f, 1.0f},
-            .intensity = 1e9f,
+            .position = {-5000.0, -10000.0f, 1000.0f},
+            .color = WHITE,
+            .intensity = 6e8f,
         };
 
         Ray ray_to_light = {
@@ -154,27 +168,39 @@ void raytrace_ray(Scene *scene, Ray *ray)
             .direction = normalize(sub3f(light.position, ray_result.intersection_point)),
         };
 
-        Ray_Result light_ray_result = find_ray_hit(scene, &ray_to_light);
+        Ray_Result light_ray_result = find_ray_hit(scene, ray_to_light);
 
         if (!light_ray_result.hit) {
-            Material *material = scene->materials + ray_result.material_id;
-
             Vec3f light_path = sub3f(ray_result.intersection_point, light.position);
             Vec3f light_direction = normalize(light_path);
 
             float dist2 = norm2(light_path);
             float power = light.intensity / (4.0f * M_PI * dist2);
 
-            Vec3f max_light_direction = add3f(light_direction, scale3f(ray_result.surface_normal, - 2 * dot3f(ray_result.surface_normal, light_direction)));
+            // Vec3f max_light_direction = add3f(light_direction, scale3f(ray_result.surface_normal, - 2 * dot3f(ray_result.surface_normal, light_direction)));
             // float scale = - dot3f(max_light_direction, direction);
             float scale = - dot3f(light_direction, ray_result.surface_normal);
             if (scale < 0) scale = 0;
 
             Vec3f final_light_color = scale3f(light.color, power * scale);
 
-            ray->color = mul3f(final_light_color, material->color);
+            Vec3f color = mul3f(final_light_color, material->diffuse_color);
+            
+            accumulated_color = add3f(accumulated_color, mul3f(color_scale, color));
         }
+
+        color_scale = mul3f(color_scale, material->mirror_color);
+
+        // Si on ajoute plus assez de lumière après chaque rebond, on arrête
+        if (norm2(color_scale) < 1e-3) break;
+
+        ray.origin = ray_result.intersection_point;
+
+        Vec3f dir_normal = scale3f(ray_result.surface_normal, dot3f(ray_result.surface_normal, ray.direction));
+        ray.direction = add3f(ray.direction, scale3f(dir_normal, -2.0f));
     }
+
+    return accumulated_color;
 }
 
 void raytrace_region(Job *job)
@@ -190,7 +216,7 @@ void raytrace_region(Job *job)
 
     Vec3f camera_direction = normalize(sub3f(camera->lookAt, camera->position));
     Vec3f camera_up = normalize(camera->up);
-    Vec3f camera_right = cross3f(camera_up, camera_direction);
+    Vec3f camera_right = cross3f(camera_direction, camera_up);
 
     float fov_h = camera->field_of_view;
     float fov_v = (float)image->size.height / (float)image->size.width * fov_h;
@@ -217,14 +243,11 @@ void raytrace_region(Job *job)
             Ray ray = {
                 .origin = camera->position,
                 .direction = direction,
-
-                .color = {},
-                .hit_count = 0,
             };
 
-            raytrace_ray(scene, &ray);
+            Vec3f ray_color = raytrace_ray(scene, ray);
 
-            image->pixels[image->size.width * pixel_coord.y + pixel_coord.x] = ray.color;
+            image->pixels[image->size.width * pixel_coord.y + pixel_coord.x] = ray_color;
         }
     }
 }
@@ -237,13 +260,16 @@ int main()
 
     Material materials[] = {
         {
-            .color = {1.0f, 0.0f, 0.0f},
+            .diffuse_color = RED,
+            .mirror_color = scale3f(WHITE, 0.1),
         },
         {
-            .color = {1.0f, 1.0f, 1.0f},
+            .diffuse_color = WHITE,
+            .mirror_color = BLACK,
         },
         {
-            .color = {0.0f, 1.0f, 0.0f},
+            .diffuse_color = GREEN,
+            .mirror_color = scale3f(WHITE, 0.5),
         },
     };
 
@@ -253,16 +279,19 @@ int main()
             .radius = 1.0f,
             .material_id = 0,
         },
+#if 1
         {
-            .center = {1.0f, 2.0f, 0.5f},
+            .center = {2.0f, 0.0f, 0.5f},
+            // .center = {0.0f, -1.0f, 0.0f},
             .radius = 0.7f,
             .material_id = 2,
         }
+#endif
     };
 
     Plane planes[] = {
         {
-            .normal = {-1.0f, 0.0f, 0.0f},
+            .normal = {0.0f, -1.0f, 0.0f},
             .d = -10000.0f,
             .material_id = 1,
         }
@@ -270,7 +299,7 @@ int main()
 
     Scene scene = {
         .camera = {
-            .position = {-3.0f, 0.0f, 0.0f},
+            .position = {0.0f, -3.0f, 0.0f},
             .lookAt = {0.0f, 0.0f, 0.0f},
             .up = {0.0f, 0.0f, 1.0f},
             .field_of_view = 90,
