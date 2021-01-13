@@ -65,6 +65,13 @@ typedef struct Image3f
     Vec3f *pixels;
 } Image3f;
 
+typedef struct Light
+{
+    Vec3f position;
+    Vec3f color;
+    float intensity;
+} Light;
+
 typedef struct Material
 {
     Vec3f color;

@@ -26,6 +26,19 @@ typedef struct Ray
     uint32_t hit_count;
 } Ray;
 
+typedef struct Ray_Result
+{
+    bool hit;
+
+    // infos géométriques
+    Vec3f intersection_point;
+    Vec3f surface_normal;
+    float t_min;
+
+    // infos graphiques
+    int32_t material_id;
+} Ray_Result;
+
 typedef struct Job
 {
     Scene   *scene;

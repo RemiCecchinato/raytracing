@@ -53,6 +53,7 @@ bool save_image(char *filename, Image3f *image)
     for (int j = 0; j < image->size.height; j++) {
         for (int i = 0; i < image->size.width; i++) {
             Vec3f pixel_color = min3f(image->pixels[j * image->size.width + i], (Vec3f){1.0f, 1.0f, 1.0f});
+            pixel_color = pow3f(pixel_color, 1.0f / 2.2f);
             pixel_color = scale3f(pixel_color, 255.0f);
 
             *pixel++ = (uint8_t)pixel_color.r;
@@ -68,14 +69,17 @@ bool save_image(char *filename, Image3f *image)
     return true;
 }
 
-void raytrace_ray(Scene *scene, Ray *ray)
+Ray_Result find_ray_hit(Scene *scene, Ray *ray)
 {
     Camera *camera = &scene->camera;
 
-    float t_min = FLT_MAX;
-    int32_t material_id = -1;
-    Vec3f intersection_point = {};
-    Vec3f surface_normal = {};
+    Ray_Result result = {
+        .hit = false,
+        .intersection_point = {},
+        .surface_normal = {},
+        .t_min = FLT_MAX,
+        .material_id = -1,
+    };
 
     // On teste toutes les sphères
     for (int i = 0; i < scene->sphere_count; i++) {
@@ -101,13 +105,14 @@ void raytrace_ray(Scene *scene, Ray *ray)
         if (t < 0.0f) t = -b + sqrt_det;
 
         // On est pas la sphère la plus proche
-        if (t > t_min) continue;
+        if (t > result.t_min) continue;
 
-        t_min = t;
-        material_id = sphere->material_id;
+        result.hit = true;
+        result.t_min = t;
+        result.material_id = sphere->material_id;
 
-        intersection_point = add3f(camera->position, scale3f(ray->direction, t));
-        surface_normal = normalize(sub3f(intersection_point, sphere->center));
+        result.intersection_point = add3f(camera->position, scale3f(ray->direction, t));
+        result.surface_normal = normalize(sub3f(result.intersection_point, sphere->center));
     }
 
     // On teste tous les plans
@@ -118,36 +123,57 @@ void raytrace_ray(Scene *scene, Ray *ray)
 
         if (t < 0) continue;
 
-        if (t > t_min) continue;
+        if (t > result.t_min) continue;
 
-        t_min = t;
-        material_id = plane->material_id;
+        result.hit = true;
+        result.t_min = t;
+        result.material_id = plane->material_id;
 
-        intersection_point = add3f(camera->position, scale3f(ray->direction, t));
-        surface_normal = plane->normal;
+        result.intersection_point = add3f(camera->position, scale3f(ray->direction, t));
+        result.surface_normal = plane->normal;
     }
 
-    if (material_id != -1) {
-        Material *material = scene->materials + material_id;
+    return result;
+}
 
-        Vec3f light_position = {-10000.0, -5000.0f, 1000.0f};
-        Vec3f light_color = {1.0f, 1.0f, 1.0f};
-        float intensity = 1.5e9f;
+void raytrace_ray(Scene *scene, Ray *ray)
+{
+    Camera *camera = &scene->camera;
 
-        Vec3f light_path = sub3f(intersection_point, light_position);
-        Vec3f light_direction = normalize(light_path);
+    Ray_Result ray_result = find_ray_hit(scene, ray);
 
-        float dist2 = norm2(light_path);
-        float power = intensity / (4.0f * M_PI * dist2);
+    if (ray_result.hit) {
+        Light light = {
+            .position = {-10000.0, -5000.0f, 1000.0f},
+            .color = {1.0f, 1.0f, 1.0f},
+            .intensity = 1e9f,
+        };
 
-        Vec3f max_light_direction = add3f(light_direction, scale3f(surface_normal, - 2 * dot3f(surface_normal, light_direction)));
-        // float scale = - dot3f(max_light_direction, direction);
-        float scale = - dot3f(light_direction, surface_normal);
-        if (scale < 0) scale = 0;
+        Ray ray_to_light = {
+            .origin = ray_result.intersection_point,
+            .direction = normalize(sub3f(light.position, ray_result.intersection_point)),
+        };
 
-        Vec3f final_light_color = scale3f(light_color, power * scale);
+        Ray_Result light_ray_result = find_ray_hit(scene, &ray_to_light);
 
-        ray->color = mul3f(final_light_color, material->color);
+        if (!light_ray_result.hit) {
+            Material *material = scene->materials + ray_result.material_id;
+
+            Vec3f light_path = sub3f(ray_result.intersection_point, light.position);
+            Vec3f light_direction = normalize(light_path);
+
+            float dist2 = norm2(light_path);
+            float power = light.intensity / (4.0f * M_PI * dist2);
+
+            Vec3f max_light_direction = add3f(light_direction, scale3f(ray_result.surface_normal, - 2 * dot3f(ray_result.surface_normal, light_direction)));
+            // float scale = - dot3f(max_light_direction, direction);
+            float scale = - dot3f(light_direction, ray_result.surface_normal);
+            if (scale < 0) scale = 0;
+
+            Vec3f final_light_color = scale3f(light.color, power * scale);
+
+            ray->color = mul3f(final_light_color, material->color);
+        }
     }
 }
 

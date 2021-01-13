@@ -84,6 +84,17 @@ Vec3f min3f(Vec3f left, Vec3f right)
     return result;
 }
 
+Vec3f pow3f(Vec3f left, float power)
+{
+    Vec3f result = {
+        .x = powf(left.x, power),
+        .y = powf(left.y, power),
+        .z = powf(left.z, power),
+    };
+
+    return result;
+}
+
 Vec3f cross3f(Vec3f left, Vec3f right)
 {
     Vec3f result = {
