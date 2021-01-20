@@ -97,11 +97,12 @@ typedef struct Plane
     int32_t material_id;
 } Plane;
 
-const Vec3f BLACK = {0.0f, 0.0f, 0.0f};
-const Vec3f WHITE = {1.0f, 1.0f, 1.0f};
-const Vec3f RED   = {1.0f, 0.0f, 0.0f};
-const Vec3f GREEN = {0.0f, 1.0f, 0.0f};
-const Vec3f BLUE  = {0.0f, 0.0f, 1.0f};
-const Vec3f PINK  = {1.0f, 0.0f, 1.0f};
+const Vec3f BLACK  = {0.0f, 0.0f, 0.0f};
+const Vec3f WHITE  = {1.0f, 1.0f, 1.0f};
+const Vec3f RED    = {1.0f, 0.0f, 0.0f};
+const Vec3f GREEN  = {0.0f, 1.0f, 0.0f};
+const Vec3f BLUE   = {0.0f, 0.0f, 1.0f};
+const Vec3f PINK   = {1.0f, 0.0f, 1.0f};
+const Vec3f YELLOW = {1.0f, 1.0f, 0.0f};
 
 #endif

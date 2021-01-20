@@ -262,7 +262,7 @@ int main()
             .mirror_color = BLACK,
         },
         {   // Right Wall.
-            .diffuse_color = RED,
+            .diffuse_color = YELLOW,
             .mirror_color = BLACK,
         },
         {   // Perfect mirror sphere.
@@ -270,7 +270,7 @@ int main()
             .mirror_color = WHITE,
         },
         {   // Ceilling.
-            .diffuse_color = WHITE,
+            .diffuse_color = RED,
             .mirror_color = BLACK,
         },
 #if 0
@@ -306,12 +306,12 @@ int main()
             .material_id = 2,
         },
         {
-            .normal = {-1.0f, 0.0f, 0.0f},
+            .normal = {1.0f, 0.0f, 0.0f},
             .d = -60.0f,
             .material_id = 3,
         },
         {
-            .normal = {1.0f, 0.0f, 0.0f},
+            .normal = {-1.0f, 0.0f, 0.0f},
             .d = -60.0f,
             .material_id = 4,
         },
