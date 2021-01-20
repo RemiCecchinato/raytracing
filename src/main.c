@@ -160,7 +160,7 @@ Vec3f raytrace_ray(Scene *scene, Ray ray)
         Light light = {
             .position = {-10, 20, 40},
             .color = WHITE,
-            .intensity = 6e4f,
+            .intensity = 5e3f,
         };
 
         Ray ray_to_light = {
@@ -219,27 +219,12 @@ void raytrace_region(Job *job)
     Vec3f camera_right = normalize(cross3f(camera_direction, camera->up));
     Vec3f camera_up = cross3f(camera_right, camera_direction);
 
-    float fov_h = camera->field_of_view;
-    float fov_v = (float)image->size.height / (float)image->size.width * fov_h;
-
-    Vec3f pixel_right = scale3f(camera_right, sinf(fov_h * 0.5f) / (float)image->size.width * 2);
-    Vec3f pixel_up    = scale3f(camera_up, sinf(fov_v * 0.5f) / (float)image->size.height * 2);
-
-    Vec2f pixel_center = {
-        .x = (float)image->size.width / 2,
-        .y = (float)image->size.height / 2,
-    };
-
     for (uint32_t y = y_start; y < y_end; y++) {
         for (uint32_t x = x_start; x < x_end; x++) {
-            Vec2i pixel_coord = {.x = x, .y = y};
-
-            Vec2f pixel_coord_f = {.x = (float)x, .y = (float)y};
-
-            Vec3f direction = camera_direction;
-            direction = add3f(direction, scale3f(pixel_right, pixel_coord_f.x - pixel_center.x));
-            direction = add3f(direction, scale3f(pixel_up,  -(pixel_coord_f.y - pixel_center.y)));
-            direction = normalize(direction);
+            Vec3f direction_right = scale3f(camera_right, (float)x - (float)image->size.width / 2.0f + 0.5f);
+            Vec3f direction_up    = scale3f(camera_up, -((float)y - (float)image->size.height / 2.0f + 0.5f));
+            Vec3f direction_main  = scale3f(camera_direction, (float)image->size.height / (2.0f * tanf(camera->field_of_view / 2.0f)));
+            Vec3f direction = normalize(add3f(add3f(direction_right, direction_up), direction_main));
 
             Ray ray = {
                 .origin = camera->position,
@@ -248,7 +233,7 @@ void raytrace_region(Job *job)
 
             Vec3f ray_color = raytrace_ray(scene, ray);
 
-            image->pixels[image->size.width * pixel_coord.y + pixel_coord.x] = ray_color;
+            image->pixels[image->size.width * y + x] = ray_color;
         }
     }
 }
@@ -327,7 +312,7 @@ int main()
         },
         {
             .normal = {0.0f, 1.0f, 0.0f},
-            .d = -60.0f,
+            .d = -10.0f,
             .material_id = 2,
         },
         {
