@@ -158,9 +158,9 @@ Vec3f raytrace_ray(Scene *scene, Ray ray)
         Material *material = scene->materials + ray_result.material_id;
 
         Light light = {
-            .position = {-5000.0, -10000.0f, 1000.0f},
+            .position = {-10, 20, 40},
             .color = WHITE,
-            .intensity = 6e8f,
+            .intensity = 6e4f,
         };
 
         Ray ray_to_light = {
@@ -170,11 +170,12 @@ Vec3f raytrace_ray(Scene *scene, Ray ray)
 
         Ray_Result light_ray_result = find_ray_hit(scene, ray_to_light);
 
-        if (!light_ray_result.hit) {
-            Vec3f light_path = sub3f(ray_result.intersection_point, light.position);
-            Vec3f light_direction = normalize(light_path);
+        Vec3f light_path = sub3f(ray_result.intersection_point, light.position);
+        Vec3f light_direction = normalize(light_path);
 
-            float dist2 = norm2(light_path);
+        float dist2 = norm2(light_path);
+
+        if (!light_ray_result.hit || light_ray_result.t_min * light_ray_result.t_min > dist2) {
             float power = light.intensity / (4.0f * M_PI * dist2);
 
             // Vec3f max_light_direction = add3f(light_direction, scale3f(ray_result.surface_normal, - 2 * dot3f(ray_result.surface_normal, light_direction)));
@@ -215,8 +216,8 @@ void raytrace_region(Job *job)
     uint32_t y_end = job->region.point.y + job->region.size.y;
 
     Vec3f camera_direction = normalize(sub3f(camera->lookAt, camera->position));
-    Vec3f camera_up = normalize(camera->up);
-    Vec3f camera_right = cross3f(camera_direction, camera_up);
+    Vec3f camera_right = normalize(cross3f(camera_direction, camera->up));
+    Vec3f camera_up = cross3f(camera_right, camera_direction);
 
     float fov_h = camera->field_of_view;
     float fov_v = (float)image->size.height / (float)image->size.width * fov_h;
@@ -259,50 +260,101 @@ int main()
     Image3f dest_image = create_blank_image(width, height);
 
     Material materials[] = {
-        {
-            .diffuse_color = RED,
-            .mirror_color = scale3f(WHITE, 0.1),
+        {   // The sphere in the center of the scene.
+            .diffuse_color = scale3f(WHITE, 0.5f),
+            .mirror_color = scale3f(WHITE, 0.1f),
         },
-        {
-            .diffuse_color = WHITE,
+        {   // The background wall.
+            .diffuse_color = GREEN,
             .mirror_color = BLACK,
         },
+        {   // The ground
+            .diffuse_color = BLUE,
+            .mirror_color = BLACK,
+        },
+        {   // Left wall.
+            .diffuse_color = PINK,
+            .mirror_color = BLACK,
+        },
+        {   // Right Wall
+            .diffuse_color = RED,
+            .mirror_color = BLACK,
+        },
+#if 0
         {
             .diffuse_color = GREEN,
-            .mirror_color = scale3f(WHITE, 0.5),
+            .mirror_color = scale3f(WHITE, 0.5f),
         },
+#endif
     };
 
     Sphere spheres[] = {
-        {
+        {   // The sphere in the center of the scene.
             .center = {0.0f, 0.0f, 0.0f},
-            .radius = 1.0f,
+            .radius = 10.0f,
             .material_id = 0,
         },
-#if 1
+#if 0
+        {   // The background wall.
+            .center = {0, 0, -1000},
+            .radius = 940.0f,
+            .material_id = 1,
+        },
+        {   // The floor.
+            .center = {0, -1000, 0},
+            .radius = 940,
+            .material_id = 2,
+        },
+        {   // The ceilling.
+            .center = {0, 1000, 0},
+            .radius = 940,
+            .material_id = 3,
+        },
         {
             .center = {2.0f, 0.0f, 0.5f},
             // .center = {0.0f, -1.0f, 0.0f},
             .radius = 0.7f,
-            .material_id = 2,
-        }
+            .material_id = 3,
+        },
 #endif
     };
 
     Plane planes[] = {
         {
+            .normal = {0.0f, 0.0f, 1.0f},
+            .d = -60.0f,
+            .material_id = 1,
+        },
+        {
+            .normal = {0.0f, 1.0f, 0.0f},
+            .d = -60.0f,
+            .material_id = 2,
+        },
+        {
+            .normal = {-1.0f, 0.0f, 0.0f},
+            .d = -60.0f,
+            .material_id = 3,
+        },
+        {
+            .normal = {1.0f, 0.0f, 0.0f},
+            .d = -60.0f,
+            .material_id = 4,
+        },
+#if 0
+        {
             .normal = {0.0f, -1.0f, 0.0f},
             .d = -10000.0f,
             .material_id = 1,
         }
+#endif
     };
 
     Scene scene = {
         .camera = {
-            .position = {0.0f, -3.0f, 0.0f},
+            .position = {0.0f, 0.0f, 55.0f},
             .lookAt = {0.0f, 0.0f, 0.0f},
-            .up = {0.0f, 0.0f, 1.0f},
-            .field_of_view = 90,
+            .up = {0.0f, 1.0f, 0.0f},
+            .field_of_view = 90.0f / 180.0f * M_PI,
         },
 
         .material_count = ARRAY_SIZE(materials),
