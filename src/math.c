@@ -115,3 +115,10 @@ Vec3f scale3f(Vec3f vec, float scale)
 
     return result;
 }
+
+Vec3f project3f(Vec3f onto, Vec3f projectee)
+{
+    Vec3f result = scale3f(onto, dot3f(onto, projectee));
+
+    return result;
+}

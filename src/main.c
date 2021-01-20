@@ -146,9 +146,13 @@ Ray_Result find_ray_hit(Scene *scene, Ray ray)
 Vec3f raytrace_ray(Scene *scene, Ray ray)
 {
     Camera *camera = &scene->camera;
-    
+
     Vec3f color_scale = WHITE;
     Vec3f accumulated_color = BLACK;
+
+    // Keeps tracks of whether we are inside a transparent object or not.
+    // With this method it is impossible to have transparent objects intersecting.
+    bool within_transparent_object = false;
 
     for (int ray_count = 0; ray_count < 64; ray_count++) {
         Ray_Result ray_result = find_ray_hit(scene, ray);
@@ -157,48 +161,71 @@ Vec3f raytrace_ray(Scene *scene, Ray ray)
 
         Material *material = scene->materials + ray_result.material_id;
 
-        Light light = {
-            .position = {-10, 20, 40},
-            .color = WHITE,
-            .intensity = 5e3f,
-        };
+        if (material->transparent) {
+            Vec3f incident_normal = project3f(ray_result.surface_normal, ray.direction);
+            Vec3f incident_tangent = sub3f(ray.direction, incident_normal);
 
-        Ray ray_to_light = {
-            .origin = ray_result.intersection_point,
-            .direction = normalize(sub3f(light.position, ray_result.intersection_point)),
-        };
+            float index_ratio = within_transparent_object ? (material->n) : (1.0f / material->n);
 
-        Ray_Result light_ray_result = find_ray_hit(scene, ray_to_light);
+            Vec3f transmited_tangent = scale3f(incident_tangent, index_ratio);
 
-        Vec3f light_path = sub3f(ray_result.intersection_point, light.position);
-        Vec3f light_direction = normalize(light_path);
+            if (norm2(transmited_tangent) > 1) {
+                // Incomming angle is too big, simply reflect on next ray.
 
-        float dist2 = norm2(light_path);
+                ray.origin = ray_result.intersection_point;
+                ray.direction = sub3f(incident_tangent, incident_normal);
+            } else {
+                // Transmit the ray.
+                within_transparent_object = !within_transparent_object;
 
-        if (!light_ray_result.hit || light_ray_result.t_min * light_ray_result.t_min > dist2) {
-            float power = light.intensity / (4.0f * M_PI * dist2);
+                Vec3f transmited_normal = scale3f(normalize(incident_normal), sqrtf(1 - norm2(transmited_tangent)));
+                ray.origin = ray_result.intersection_point;
+                ray.direction = add3f(transmited_normal, transmited_tangent);
+            }
+        } else { // Non transparent material.
+            Light light = {
+                .position = {-10, 20, 40},
+                .color = WHITE,
+                .intensity = 5e3f,
+            };
 
-            // Vec3f max_light_direction = add3f(light_direction, scale3f(ray_result.surface_normal, - 2 * dot3f(ray_result.surface_normal, light_direction)));
-            // float scale = - dot3f(max_light_direction, direction);
-            float scale = - dot3f(light_direction, ray_result.surface_normal);
-            if (scale < 0) scale = 0;
+            Ray ray_to_light = {
+                .origin = ray_result.intersection_point,
+                .direction = normalize(sub3f(light.position, ray_result.intersection_point)),
+            };
 
-            Vec3f final_light_color = scale3f(light.color, power * scale);
+            Ray_Result light_ray_result = find_ray_hit(scene, ray_to_light);
 
-            Vec3f color = mul3f(final_light_color, material->diffuse_color);
-            
-            accumulated_color = add3f(accumulated_color, mul3f(color_scale, color));
+            Vec3f light_path = sub3f(ray_result.intersection_point, light.position);
+            Vec3f light_direction = normalize(light_path);
+
+            float dist2 = norm2(light_path);
+
+            if (!light_ray_result.hit || light_ray_result.t_min * light_ray_result.t_min > dist2) {
+                float power = light.intensity / (4.0f * M_PI * dist2);
+
+                // Vec3f max_light_direction = add3f(light_direction, scale3f(ray_result.surface_normal, - 2 * dot3f(ray_result.surface_normal, light_direction)));
+                // float scale = - dot3f(max_light_direction, direction);
+                float scale = - dot3f(light_direction, ray_result.surface_normal);
+                if (scale < 0) scale = 0;
+
+                Vec3f final_light_color = scale3f(light.color, power * scale);
+
+                Vec3f color = mul3f(final_light_color, material->diffuse_color);
+                
+                accumulated_color = add3f(accumulated_color, mul3f(color_scale, color));
+            }
+
+            color_scale = mul3f(color_scale, material->mirror_color);
+
+            // Si on ajoute plus assez de lumière après chaque rebond, on arrête
+            if (norm2(color_scale) < 1e-3) break;
+
+            ray.origin = ray_result.intersection_point;
+
+            Vec3f dir_normal = scale3f(ray_result.surface_normal, dot3f(ray_result.surface_normal, ray.direction));
+            ray.direction = add3f(ray.direction, scale3f(dir_normal, -2.0f));
         }
-
-        color_scale = mul3f(color_scale, material->mirror_color);
-
-        // Si on ajoute plus assez de lumière après chaque rebond, on arrête
-        if (norm2(color_scale) < 1e-3) break;
-
-        ray.origin = ray_result.intersection_point;
-
-        Vec3f dir_normal = scale3f(ray_result.surface_normal, dot3f(ray_result.surface_normal, ray.direction));
-        ray.direction = add3f(ray.direction, scale3f(dir_normal, -2.0f));
     }
 
     return accumulated_color;
@@ -273,12 +300,13 @@ int main()
             .diffuse_color = RED,
             .mirror_color = BLACK,
         },
-#if 0
-        {
-            .diffuse_color = GREEN,
-            .mirror_color = scale3f(WHITE, 0.5f),
+        {   // Transparent sphere.
+            .diffuse_color = BLACK,
+            .mirror_color = BLACK,
+
+            .transparent = true,
+            .n = 1.5f,
         },
-#endif
     };
 
     Sphere spheres[] = {
@@ -287,10 +315,15 @@ int main()
             .radius = 10.0f,
             .material_id = 0,
         },
-        {
+        {   // Left-most sphere, verry mirrory.
             .center = {-8.0f, 10.0f, 15.0f},
             .radius = 5.0f,
             .material_id = 5,
+        },
+        {   // Right-most sphere, transparent.
+            .center = {-4.0f, 5.0f, 25.0f},
+            .radius = 4.0f,
+            .material_id = 7,
         },
     };
 
