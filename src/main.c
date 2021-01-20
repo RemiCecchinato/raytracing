@@ -253,7 +253,7 @@ int main()
             .diffuse_color = GREEN,
             .mirror_color = BLACK,
         },
-        {   // The ground
+        {   // The ground.
             .diffuse_color = BLUE,
             .mirror_color = BLACK,
         },
@@ -261,8 +261,16 @@ int main()
             .diffuse_color = PINK,
             .mirror_color = BLACK,
         },
-        {   // Right Wall
+        {   // Right Wall.
             .diffuse_color = RED,
+            .mirror_color = BLACK,
+        },
+        {   // Perfect mirror sphere.
+            .diffuse_color = BLACK,
+            .mirror_color = WHITE,
+        },
+        {   // Ceilling.
+            .diffuse_color = WHITE,
             .mirror_color = BLACK,
         },
 #if 0
@@ -279,29 +287,11 @@ int main()
             .radius = 10.0f,
             .material_id = 0,
         },
-#if 0
-        {   // The background wall.
-            .center = {0, 0, -1000},
-            .radius = 940.0f,
-            .material_id = 1,
-        },
-        {   // The floor.
-            .center = {0, -1000, 0},
-            .radius = 940,
-            .material_id = 2,
-        },
-        {   // The ceilling.
-            .center = {0, 1000, 0},
-            .radius = 940,
-            .material_id = 3,
-        },
         {
-            .center = {2.0f, 0.0f, 0.5f},
-            // .center = {0.0f, -1.0f, 0.0f},
-            .radius = 0.7f,
-            .material_id = 3,
+            .center = {-8.0f, 10.0f, 15.0f},
+            .radius = 5.0f,
+            .material_id = 5,
         },
-#endif
     };
 
     Plane planes[] = {
@@ -325,21 +315,19 @@ int main()
             .d = -60.0f,
             .material_id = 4,
         },
-#if 0
         {
             .normal = {0.0f, -1.0f, 0.0f},
-            .d = -10000.0f,
-            .material_id = 1,
-        }
-#endif
+            .d = -90.0f,
+            .material_id = 6,
+        },
     };
 
     Scene scene = {
         .camera = {
-            .position = {0.0f, 0.0f, 55.0f},
+            .position = {0.0f, 10.0f, 55.0f},
             .lookAt = {0.0f, 0.0f, 0.0f},
             .up = {0.0f, 1.0f, 0.0f},
-            .field_of_view = 90.0f / 180.0f * M_PI,
+            .field_of_view = 60.0f / 180.0f * M_PI,
         },
 
         .material_count = ARRAY_SIZE(materials),
