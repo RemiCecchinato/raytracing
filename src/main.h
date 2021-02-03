@@ -43,6 +43,8 @@ typedef struct Job
     Scene   *scene;
     Image3f *image;
     Rect2i   region;
+    uint32_t ray_per_pixel;
+    Random_Serie serie;
 } Job;
 
 #define ARRAY_SIZE(x) ((sizeof(x) / sizeof(x[0])))

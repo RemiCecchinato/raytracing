@@ -1,8 +1,20 @@
 #ifndef MATH_H
 #define MATH_H
 
+#include <immintrin.h>
+#include <wmmintrin.h>
+
 #define MAX(a, b) ((a) > (b) ? (a) : (b))
 #define MIN(a, b) ((a) < (b) ? (a) : (b))
+
+typedef struct Random_Serie
+{
+    union
+    {
+        uint8_t bytes[32];
+        __m128i xmm[2];
+    };
+} Random_Serie;
 
 typedef union Vec2i
 {
@@ -50,6 +62,17 @@ typedef union Vec3f
         float coord[3];
     };
 } Vec3f;
+
+typedef union Vec4f
+{
+    struct {
+        float x, y, z, w;
+    };
+
+    struct {
+        float coord[4];
+    };
+} Vec4f;
 
 typedef struct Camera
 {

@@ -143,7 +143,7 @@ Ray_Result find_ray_hit(Scene *scene, Ray ray)
     return result;
 }
 
-Vec3f raytrace_ray(Scene *scene, Ray ray)
+Vec3f raytrace_ray(Job *job, Scene *scene, Ray ray)
 {
     Camera *camera = &scene->camera;
 
@@ -186,7 +186,7 @@ Vec3f raytrace_ray(Scene *scene, Ray ray)
             Light light = {
                 .position = {-10, 20, 40},
                 .color = WHITE,
-                .intensity = 5e3f,
+                .intensity = 5e4f,
             };
 
             Ray ray_to_light = {
@@ -210,7 +210,6 @@ Vec3f raytrace_ray(Scene *scene, Ray ray)
                 if (scale < 0) scale = 0;
 
                 Vec3f final_light_color = scale3f(light.color, power * scale);
-
                 Vec3f color = mul3f(final_light_color, material->diffuse_color);
                 
                 accumulated_color = add3f(accumulated_color, mul3f(color_scale, color));
@@ -223,8 +222,39 @@ Vec3f raytrace_ray(Scene *scene, Ray ray)
 
             ray.origin = ray_result.intersection_point;
 
-            Vec3f dir_normal = scale3f(ray_result.surface_normal, dot3f(ray_result.surface_normal, ray.direction));
-            ray.direction = add3f(ray.direction, scale3f(dir_normal, -2.0f));
+            Vec2f r = random2f_uniform(&job->serie, 0, 1);
+            Vec3f random_direction = {
+                .x = cosf(2.0f * M_PI * r.x) * sqrtf(1 - r.y),
+                .y = sinf(2.0f * M_PI * r.x) * sqrtf(1 - r.y),
+                .z = sqrtf(r.y),
+            };
+
+            Vec3f dir_normal = ray_result.surface_normal; // scale3f(ray_result.surface_normal, dot3f(ray_result.surface_normal, ray.direction));
+            Vec3f dir_tan0 = {};
+            if (fabsf(dir_normal.x) >= fabsf(dir_normal.y) && fabsf(dir_normal.x) >= fabsf(dir_normal.z)) {
+                dir_tan0.x =   dir_normal.y;
+                dir_tan0.y = - dir_normal.x;
+                dir_tan0.z = 0;
+            } else if (fabsf(dir_normal.y) >= fabsf(dir_normal.x) && fabsf(dir_normal.y) >= fabsf(dir_normal.z)) {
+                dir_tan0.x =   dir_normal.y;
+                dir_tan0.y = - dir_normal.x;
+                dir_tan0.z = 0;
+            } else if (fabsf(dir_normal.z) >= fabsf(dir_normal.x) && fabsf(dir_normal.z) >= fabsf(dir_normal.y)) {
+                dir_tan0.x = 0;
+                dir_tan0.y = - dir_normal.z;
+                dir_tan0.z = dir_normal.y;
+            }
+            Vec3f dir_tan1 = cross3f(dir_normal, dir_tan0);
+
+            Vec3f new_dir = add3f(scale3f(dir_normal, random_direction.z),
+                            add3f(scale3f(dir_tan0, - random_direction.y),
+                                  scale3f(dir_tan1, - random_direction.x)));
+
+            new_dir = normalize(new_dir);
+
+            color_scale = scale3f(color_scale, dot3f(new_dir, dir_normal));
+
+            ray.direction = new_dir; // add3f(ray.direction, scale3f(new_dir, -2.0f));
         }
     }
 
@@ -248,25 +278,80 @@ void raytrace_region(Job *job)
 
     for (uint32_t y = y_start; y < y_end; y++) {
         for (uint32_t x = x_start; x < x_end; x++) {
-            Vec3f direction_right = scale3f(camera_right, (float)x - (float)image->size.width / 2.0f + 0.5f);
-            Vec3f direction_up    = scale3f(camera_up, -((float)y - (float)image->size.height / 2.0f + 0.5f));
-            Vec3f direction_main  = scale3f(camera_direction, (float)image->size.height / (2.0f * tanf(camera->field_of_view / 2.0f)));
-            Vec3f direction = normalize(add3f(add3f(direction_right, direction_up), direction_main));
+            Vec3f total_color = {};
+            float sigma = 0.5f;
 
-            Ray ray = {
-                .origin = camera->position,
-                .direction = direction,
-            };
+            for (int i = 0; i < job->ray_per_pixel; i++) {
+                // Vec2f random_direction = random2f_uniform(&job->serie, -0.5f, 0.5f);
+                Vec2f random_direction = random2f_gaussian(&job->serie, 0, 0.25f);
+                Vec3f direction_right = scale3f(camera_right, (float)x - (float)image->size.width / 2.0f + 0.5f + random_direction.x);
+                Vec3f direction_up    = scale3f(camera_up, -((float)y - (float)image->size.height / 2.0f + 0.5f + random_direction.y));
+                Vec3f direction_main  = scale3f(camera_direction, (float)image->size.height / (2.0f * tanf(camera->field_of_view / 2.0f)));
+                Vec3f direction = normalize(add3f(add3f(direction_right, direction_up), direction_main));
 
-            Vec3f ray_color = raytrace_ray(scene, ray);
+                Ray ray = {
+                    .origin = camera->position,
+                    .direction = direction,
+                };
 
-            image->pixels[image->size.width * y + x] = ray_color;
+                Vec3f ray_color = raytrace_ray(job, scene, ray);
+
+                // float p_x = expf(- random_direction.x * random_direction.x / (2.0f * sigma * sigma));
+                // float p_y = expf(- random_direction.y * random_direction.y / (2.0f * sigma * sigma));
+                // ray_color = scale3f(ray_color, 1.0f / (p_x * p_y));
+
+                total_color = add3f(total_color, ray_color);
+            }
+
+            float factor = 1.0f / (sigma * sigma * 2.0f * M_PI * job->ray_per_pixel);
+            image->pixels[image->size.width * y + x] = scale3f(total_color, factor);
         }
     }
 }
 
 int main()
 {
+#if 0
+    Random_Serie serie = create_random_serie();
+
+    float sum = 0;
+    int N = 1000000;
+    for (int i = 0; i < N; i++) {
+        #if 0
+        float sigma = 0.5;
+        float x = random2f_gaussian(&serie, 0, 0.5f).x;
+        if ((x < -M_PI_2) || (x > M_PI_2)) continue;
+
+        float p = 1.0f / (sigma * sqrtf(2.0f * M_PI)) * expf(- x * x / (2.0f * sigma * sigma));
+        float f_x = powf(cosf(x), 10.0f);
+        #else
+        float sigma = 1;
+        Vec4f r4 = random4f_gaussian(&serie, 0, sigma);
+        float x = r4.x + r4.y + r4.z + r4.w;
+
+        if ((r4.x < -M_PI_2) || (r4.x > M_PI_2)) continue;
+        if ((r4.y < -M_PI_2) || (r4.y > M_PI_2)) continue;
+        if ((r4.z < -M_PI_2) || (r4.z > M_PI_2)) continue;
+        if ((r4.w < -M_PI_2) || (r4.w > M_PI_2)) continue;
+
+        float p_x = 1.0f / (sigma * sqrtf(2.0f * M_PI)) * expf(- r4.x * r4.x / (2.0f * sigma * sigma));
+        float p_y = 1.0f / (sigma * sqrtf(2.0f * M_PI)) * expf(- r4.y * r4.y / (2.0f * sigma * sigma));
+        float p_z = 1.0f / (sigma * sqrtf(2.0f * M_PI)) * expf(- r4.z * r4.z / (2.0f * sigma * sigma));
+        float p_w = 1.0f / (sigma * sqrtf(2.0f * M_PI)) * expf(- r4.w * r4.w / (2.0f * sigma * sigma));
+        float p = p_x * p_y * p_z * p_w;
+
+        float f_x = powf(cosf(x), 2.0f);
+        #endif
+
+        sum += f_x / p;
+    }
+    sum /= N;
+
+    printf("%f\n", sum);
+
+    return 0;
+#endif
+
     int width = 512, height = 512;
 
     Image3f dest_image = create_blank_image(width, height);
@@ -325,6 +410,8 @@ int main()
             .radius = 4.0f,
             .material_id = 7,
         },
+#if 0
+#endif
     };
 
     Plane planes[] = {
@@ -388,6 +475,8 @@ int main()
                     .point = {i * block_width, j * block_height},
                     .size = {block_width, block_height}
                 };
+                jobs[4 * i +j].ray_per_pixel = 256;
+                jobs[4 * i +j].serie = create_random_serie();
 
                 int code = pthread_create(&threads[4 * i + j], NULL, (void*)raytrace_region, &jobs[4 * i + j]);
                 if (0 != code) {
@@ -408,6 +497,8 @@ int main()
                 .point = {0, 0},
                 .size = {width, height},
             },
+            .ray_per_pixel = 1,
+            .serie = create_random_serie(),
         };
 
         raytrace_region(&job);
