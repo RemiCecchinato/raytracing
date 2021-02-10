@@ -1,6 +1,7 @@
 #ifndef MATH_H
 #define MATH_H
 
+#include <stdint.h>
 #include <immintrin.h>
 #include <wmmintrin.h>
 
@@ -73,6 +74,41 @@ typedef union Vec4f
         float coord[4];
     };
 } Vec4f;
+
+typedef struct Vertex
+{
+    uint32_t vertexId;
+    uint32_t texcoordId;
+    uint32_t normalId;
+} Vertex;
+
+typedef struct Triangle
+{
+    Vertex ids[3];
+} Triangle;
+
+typedef struct Bounding_Box
+{
+    Vec3f min;
+    Vec3f max;
+} Bounding_Box;
+
+typedef struct Mesh
+{
+    uint32_t point_count;
+    Vec3f   *points;
+
+    uint32_t texcoord_count;
+    Vec2f   *texcoords;
+
+    uint32_t normal_count;
+    Vec3f   *normals;
+
+    uint32_t  face_count;
+    Triangle *faces;
+
+    Bounding_Box bbox;
+} Mesh;
 
 typedef struct Camera
 {

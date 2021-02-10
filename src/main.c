@@ -2,6 +2,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <stdint.h>
+#include <assert.h>
 #include <stdbool.h>
 #include <pthread.h>
 
@@ -67,6 +68,105 @@ bool save_image(char *filename, Image3f *image)
     free(pixels);
 
     return true;
+}
+
+Mesh load_mesh(char *filename)
+{
+    fastObjMesh* fastMesh = fast_obj_read(filename);
+    assert(fastMesh);
+
+    Mesh mesh;
+    mesh.point_count    = fastMesh->position_count;
+    mesh.points         = (Vec3f*)fastMesh->positions;
+    mesh.texcoord_count = fastMesh->texcoord_count;
+    mesh.texcoords      = (Vec2f*)fastMesh->texcoords;
+    mesh.normal_count   = fastMesh->normal_count;
+    mesh.normals        = (Vec3f*)fastMesh->normals;
+
+    for (uint32_t i = 0; i < mesh.point_count; i++) {
+        float t = mesh.points[i].y;
+        mesh.points[i].y = mesh.points[i].z;
+        mesh.points[i].z = t;
+    }
+
+    for (uint32_t i = 0; i < mesh.point_count; i++) {
+        float t = mesh.points[i].x;
+        mesh.points[i].x = mesh.points[i].z;
+        mesh.points[i].z = t;
+    }
+
+    mesh.bbox.min.x =  FLT_MAX;
+    mesh.bbox.min.y =  FLT_MAX;
+    mesh.bbox.min.z =  FLT_MAX;
+    mesh.bbox.max.x = -FLT_MAX;
+    mesh.bbox.max.y = -FLT_MAX;
+    mesh.bbox.max.z = -FLT_MAX;
+
+    for (uint32_t i = 0; i < mesh.point_count; i++) {
+        mesh.bbox.min.x = MIN(mesh.bbox.min.x, mesh.points[i].x);
+        mesh.bbox.min.y = MIN(mesh.bbox.min.y, mesh.points[i].y);
+        mesh.bbox.min.z = MIN(mesh.bbox.min.z, mesh.points[i].z);
+
+        mesh.bbox.max.x = MAX(mesh.bbox.max.x, mesh.points[i].x);
+        mesh.bbox.max.y = MAX(mesh.bbox.max.y, mesh.points[i].y);
+        mesh.bbox.max.z = MAX(mesh.bbox.max.z, mesh.points[i].z);
+    }
+
+    for (uint32_t i = 0; i < mesh.normal_count; i++) {
+        float t = mesh.normals[i].y;
+        mesh.normals[i].y = mesh.normals[i].z;
+        mesh.normals[i].z = t;
+    }
+
+    for (uint32_t i = 0; i < mesh.normal_count; i++) {
+        float t = mesh.normals[i].x;
+        mesh.normals[i].x = mesh.normals[i].z;
+        mesh.normals[i].z = t;
+    }
+
+    mesh.face_count = fastMesh->face_count * 2;
+    mesh.faces      = malloc(sizeof(*mesh.faces) * mesh.face_count);
+
+    assert(4 * fastMesh->face_count == array_size(fastMesh->indices));
+
+    for (uint32_t i = 0; i < fastMesh->face_count; i++) {
+        assert(fastMesh->face_vertices[i] == 4);
+
+        mesh.faces[2 * i + 0].ids[0] = (Vertex){
+            .vertexId   = fastMesh->indices[4 * i + 0].p,
+            .texcoordId = fastMesh->indices[4 * i + 0].t,
+            .normalId   = fastMesh->indices[4 * i + 0].n,
+        };
+        mesh.faces[2 * i + 0].ids[1] = (Vertex){
+            .vertexId   = fastMesh->indices[4 * i + 1].p,
+            .texcoordId = fastMesh->indices[4 * i + 1].t,
+            .normalId   = fastMesh->indices[4 * i + 1].n,
+        };
+        mesh.faces[2 * i + 0].ids[2] = (Vertex){
+            .vertexId   = fastMesh->indices[4 * i + 2].p,
+            .texcoordId = fastMesh->indices[4 * i + 2].t,
+            .normalId   = fastMesh->indices[4 * i + 2].n,
+        };
+
+        mesh.faces[2 * i + 1].ids[0] = (Vertex){
+            .vertexId   = fastMesh->indices[4 * i + 0].p,
+            .texcoordId = fastMesh->indices[4 * i + 0].t,
+            .normalId   = fastMesh->indices[4 * i + 0].n,
+        };
+        mesh.faces[2 * i + 1].ids[1] = (Vertex){
+            .vertexId   = fastMesh->indices[4 * i + 2].p,
+            .texcoordId = fastMesh->indices[4 * i + 2].t,
+            .normalId   = fastMesh->indices[4 * i + 2].n,
+        };
+        mesh.faces[2 * i + 1].ids[2] = (Vertex){
+            .vertexId   = fastMesh->indices[4 * i + 3].p,
+            .texcoordId = fastMesh->indices[4 * i + 3].t,
+            .normalId   = fastMesh->indices[4 * i + 3].n,
+        };
+    }
+
+    // fast_obj_destroy(fastMesh);
+    return mesh;
 }
 
 Ray_Result find_ray_hit(Scene *scene, Ray ray, float max_distance)
@@ -176,6 +276,57 @@ Ray_Result find_ray_hit(Scene *scene, Ray ray, float max_distance)
         result.material_id = plane->material_id;
     }
 
+    // On teste tous les modèles.
+    for (int i = 0; i < scene->mesh_count; i++) {
+        Mesh *mesh = scene->meshes + i;
+
+        Vec3f t0 = div3f(sub3f(mesh->bbox.min, ray.origin), ray.direction);
+        Vec3f t1 = div3f(sub3f(mesh->bbox.max, ray.origin), ray.direction);
+
+        Vec3f tmin = min3f(t0, t1);
+        Vec3f tmax = max3f(t0, t1);
+
+        float t_min = MAX(MAX(tmin.x, tmin.y), tmin.z);
+        float t_max = MIN(MIN(tmax.x, tmax.y), tmax.z);
+
+        if (t_max < t_min) continue;
+
+        for (int j = 0; j < mesh->face_count; j++) {
+            Vec3f a = mesh->points[mesh->faces[j].ids[0].vertexId];
+            Vec3f b = mesh->points[mesh->faces[j].ids[1].vertexId];
+            Vec3f c = mesh->points[mesh->faces[j].ids[2].vertexId];
+
+            Vec3f e1 = sub3f(b, a);
+            Vec3f e2 = sub3f(c, a);
+
+            Vec3f o = ray.origin;
+            Vec3f u = ray.direction;
+
+            Vec3f oau = cross3f(sub3f(o, a), u);
+            Vec3f n = cross3f(e1, e2);
+
+            float t     = - dot3f(sub3f(o, a), n) / dot3f(u, n);
+            if (t < 1e-3) continue;
+            if (t > result.t_min) continue;
+
+            float beta  = - dot3f(e2, oau) / dot3f(u, n);
+            float gamma =   dot3f(e1, oau) / dot3f(u, n);
+
+            if ((beta < 0)  || (beta > 1))  continue;
+            if ((gamma < 0) || (gamma > 1)) continue;
+            if (beta + gamma > 1) continue;
+
+            result.hit = true;
+            result.t_min = t;
+            result.object_type = TRIANGLE;
+            result.object_id = j;
+            result.mesh_id = i;
+            result.triangle_beta  = beta;
+            result.triangle_gamma = gamma;
+            result.material_id = 8; // !!!!!!!!!!!!
+        }
+    }
+
     if (result.hit) {
         switch (result.object_type) {
             case SPHERE: {
@@ -189,6 +340,23 @@ Ray_Result find_ray_hit(Scene *scene, Ray ray, float max_distance)
 
                 result.intersection_point = add3f(ray.origin, scale3f(ray.direction, result.t_min));
                 result.surface_normal = plane->normal;
+            } break;
+            case TRIANGLE: {
+                Mesh *mesh = scene->meshes + result.mesh_id;
+                Triangle *triangle = mesh->faces + result.object_id;
+
+                float beta = result.triangle_beta;
+                float gamma = result.triangle_gamma;
+                float alpha = 1 - beta - gamma;
+
+                Vec3f normal = add3f(add3f(
+                    scale3f(mesh->normals[triangle->ids[0].normalId], alpha),
+                    scale3f(mesh->normals[triangle->ids[1].normalId], beta)),
+                    scale3f(mesh->normals[triangle->ids[2].normalId], gamma)
+                );
+
+                result.intersection_point = add3f(ray.origin, scale3f(ray.direction, result.t_min));
+                result.surface_normal = normal;
             } break;
             case LIGHT: {
                 // Rien à calculer.
@@ -511,10 +679,15 @@ int main()
 
             .transparent = true,
             .n = 1.5f,
-        }
+        },
+        {
+            .diffuse_color = WHITE,
+            .mirror = false,
+        },
     };
 
     Sphere spheres[] = {
+#if 0
         {   // The sphere in the center of the scene.
             .center = {0.0f, 0.0f, 0.0f},
             .radius = 10.0f,
@@ -530,7 +703,6 @@ int main()
             .radius = 4.0f,
             .material_id = 7,
         },
-#if 0
 #endif
     };
 
@@ -571,6 +743,56 @@ int main()
         }
     };
 
+#if 0
+    Vec3f mesh_points[] = {
+        {0, 0, 0},
+        {-8, 10, 15},
+        {-4, 5, 25}
+    };
+
+    Vec2f mesh_texcoords[] = {
+        {0, 0},
+        {1, 0},
+        {0, 1},
+    };
+
+    Vec3f mesh_normals[] = {
+        {0, 0, 1},
+        {0, 1, 0},
+        {1, 0, 0},
+    };
+
+    Triangle mesh_faces[] = {
+        {
+            .ids = {
+                {0, 0, 0},
+                {1, 1, 1},
+                {2, 2, 2},
+            }
+        }
+    };
+#endif
+
+    Mesh meshes[] = {
+        load_mesh("models/dog.obj"),
+#if 0
+        {
+            .point_count = ARRAY_SIZE(mesh_points),
+            .points = mesh_points,
+
+            .texcoord_count = ARRAY_SIZE(mesh_texcoords),
+            .texcoords = mesh_texcoords,
+
+            .normal_count = ARRAY_SIZE(mesh_normals),
+            .normals = mesh_normals,
+
+            .face_count = ARRAY_SIZE(mesh_faces),
+            .faces = mesh_faces,
+        },
+#endif
+    };
+    printf("face_count : %d\n", meshes[0].face_count);
+
     Scene scene = {
         .camera = {
             .position = {0.0f, 10.0f, 55.0f},
@@ -590,6 +812,9 @@ int main()
 
         .light_count = ARRAY_SIZE(lights),
         .lights = lights,
+
+        .mesh_count = ARRAY_SIZE(meshes),
+        .meshes = meshes,
     };
 
     if (USE_THREADS) {
@@ -607,8 +832,8 @@ int main()
                     .point = {i * block_width, j * block_height},
                     .size = {block_width, block_height}
                 };
-                jobs[4 * i +j].ray_per_pixel = 1024;
-                jobs[4 * i +j].serie = create_random_serie();
+                jobs[4 * i + j].ray_per_pixel = 64;
+                jobs[4 * i + j].serie = create_random_serie();
 
                 int code = pthread_create(&threads[4 * i + j], NULL, (void*)raytrace_region, &jobs[4 * i + j]);
                 if (0 != code) {
@@ -640,3 +865,6 @@ int main()
 
     return 0;
 }
+
+#define FAST_OBJ_IMPLEMENTATION
+#include "fast_obj.h"

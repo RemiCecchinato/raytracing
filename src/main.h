@@ -2,6 +2,7 @@
 #define MAIN_H
 
 #include "math.h"
+#include "fast_obj.h"
 
 typedef struct Scene
 {
@@ -18,6 +19,9 @@ typedef struct Scene
 
     int32_t light_count;
     Light  *lights;
+
+    int32_t mesh_count;
+    Mesh   *meshes;
 } Scene;
 
 typedef struct Ray
@@ -31,6 +35,7 @@ typedef enum Object_Type
     SPHERE,
     PLANE,
     LIGHT,
+    TRIANGLE,
 } Object_Type;
 
 typedef struct Ray_Result
@@ -38,11 +43,15 @@ typedef struct Ray_Result
     bool hit;
     Object_Type object_type;
     uint32_t object_id;
+    uint32_t mesh_id;
 
     // infos géométriques
     Vec3f intersection_point;
     Vec3f surface_normal;
     float t_min;
+
+    float triangle_beta;
+    float triangle_gamma;
 
     bool enter_shape;
 

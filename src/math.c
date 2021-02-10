@@ -72,12 +72,34 @@ Vec3f mul3f(Vec3f left, Vec3f right)
     return result;
 }
 
+Vec3f div3f(Vec3f left, Vec3f right)
+{
+    Vec3f result = {
+        .x = left.x / right.x,
+        .y = left.y / right.y,
+        .z = left.z / right.z,
+    };
+
+    return result;
+}
+
 Vec3f min3f(Vec3f left, Vec3f right)
 {
     Vec3f result = {
         .x = MIN(left.x, right.x),
         .y = MIN(left.y, right.y),
         .z = MIN(left.z, right.z),
+    };
+
+    return result;
+}
+
+Vec3f max3f(Vec3f left, Vec3f right)
+{
+    Vec3f result = {
+        .x = MAX(left.x, right.x),
+        .y = MAX(left.y, right.y),
+        .z = MAX(left.z, right.z),
     };
 
     return result;
