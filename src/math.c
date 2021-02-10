@@ -230,9 +230,17 @@ Vec4f random4f_gaussian(Random_Serie *serie, float mean, float sigma)
     return result;
 }
 
-float norm24f(Vec4f vec)
+Vec3f random3f_sphere(Random_Serie *serie, float radius)
 {
-    float result = vec.x * vec.x + vec.y * vec.y + vec.z * vec.z + vec.w * vec.w;
+    Vec3f result;
+
+    do
+    {
+        result = random3f_uniform(serie, -1, 1);
+    } while (norm2(result) > 1);
+
+    result = normalize(result);
+    result = scale3f(result, radius);
 
     return result;
 }

@@ -69,21 +69,59 @@ bool save_image(char *filename, Image3f *image)
     return true;
 }
 
-Ray_Result find_ray_hit(Scene *scene, Ray ray)
+Ray_Result find_ray_hit(Scene *scene, Ray ray, float max_distance)
 {
     Ray_Result result = {
         .hit = false,
 
         .intersection_point = {},
         .surface_normal = {},
-        .t_min = FLT_MAX,
+        .t_min = max_distance,
         
         .enter_shape = false,
         
         .material_id = -1,
     };
 
-    // On teste toutes les sphères
+    // On teste toutes les sources de lumière.
+    // @CutNPaste des spheres
+    for (int i = 0; i < scene->light_count; i++) {
+        Light *light = scene->lights + i;
+
+        Vec3f OC = sub3f(ray.origin, light->center);
+
+        // On calcule un determinant réduit qui évite les multiplications par 4 puis les divions par 4
+        float b = dot3f(ray.direction, OC);
+        float c = norm2(OC) - light->radius * light->radius;
+
+        float det = b * b - c;
+
+        if (det < 0.0f) continue; // Pas d'intersection.
+
+        float sqrt_det = sqrtf(det);
+
+        // Calcul du t
+        float t = -b - sqrt_det;
+        
+        // si t < 0, alors on est à l'intérieur de la lumière (bizard ...)
+        // donc on prends le second point, plus loin.
+        if (t < 1e-3) {
+            t = -b + sqrt_det;
+        } else {
+            result.enter_shape = true;
+        }
+
+        // On est pas la lumière la plus proche.
+        if (t > result.t_min) continue;
+        if (t < 1e-3) continue;
+
+        result.hit = true;
+        result.object_type = LIGHT;
+        result.object_id = i;
+        result.t_min = t;
+    }
+
+    // On teste toutes les sphères.
     for (int i = 0; i < scene->sphere_count; i++) {
         Sphere *sphere = scene->spheres + i;
 
@@ -102,8 +140,8 @@ Ray_Result find_ray_hit(Scene *scene, Ray ray)
         // Calcul du t
         float t = -b - sqrt_det;
         
-        // si t < 0, alors on est à l'intérieur de la sphère (bizard ...)
-        // donc on prends le second point, plus loin
+        // si t < 0, alors on est à l'intérieur de la sphère
+        // donc on prends le second point, plus loin.
         if (t < 1e-3) {
             t = -b + sqrt_det;
         } else {
@@ -115,14 +153,13 @@ Ray_Result find_ray_hit(Scene *scene, Ray ray)
         if (t < 1e-3) continue;
 
         result.hit = true;
+        result.object_type = SPHERE;
+        result.object_id = i;
         result.t_min = t;
         result.material_id = sphere->material_id;
-
-        result.intersection_point = add3f(ray.origin, scale3f(ray.direction, t));
-        result.surface_normal = normalize(sub3f(result.intersection_point, sphere->center));
     }
 
-    // On teste tous les plans
+    // On teste tous les plans.
     for (int i = 0; i < scene->plane_count; i++) {
         Plane *plane = scene->planes + i;
 
@@ -133,14 +170,99 @@ Ray_Result find_ray_hit(Scene *scene, Ray ray)
         if (t > result.t_min) continue;
 
         result.hit = true;
+        result.object_type = PLANE;
+        result.object_id = i;
         result.t_min = t;
         result.material_id = plane->material_id;
+    }
 
-        result.intersection_point = add3f(ray.origin, scale3f(ray.direction, t));
-        result.surface_normal = plane->normal;
+    if (result.hit) {
+        switch (result.object_type) {
+            case SPHERE: {
+                Sphere *sphere = scene->spheres + result.object_id;
+
+                result.intersection_point = add3f(ray.origin, scale3f(ray.direction, result.t_min));
+                result.surface_normal = normalize(sub3f(result.intersection_point, sphere->center));
+            } break;
+            case PLANE: {
+                Plane *plane = scene->planes + result.object_id;
+
+                result.intersection_point = add3f(ray.origin, scale3f(ray.direction, result.t_min));
+                result.surface_normal = plane->normal;
+            } break;
+            case LIGHT: {
+                // Rien à calculer.
+            } break;
+            default: {
+                // On a rien à faire là.
+            }
+        }
     }
 
     return result;
+}
+
+Vec3f compute_light_contribution(Job *job, Scene *scene, Ray previous_ray, Ray_Result previous_ray_result)
+{
+    Vec3f total_contribution = {};
+
+    for (int32_t i = 0; i < scene->light_count; i++) {
+        Light *light = scene->lights + i;
+
+        Vec2f r = random2f_uniform(&job->serie, 0, 1);
+        Vec3f point_on_hemi_sphere = {
+            .x = cosf(2 * M_PI * r.x) * sqrtf(2 * r.y - r.y * r.y),
+            .y = sinf(2 * M_PI * r.x) * sqrtf(2 * r.y - r.y * r.y),
+            .z = 1 - r.y,
+        };
+
+        Vec3f dir_normal = normalize(sub3f(light->center, previous_ray_result.intersection_point)); // scale3f(ray_result.surface_normal, dot3f(ray_result.surface_normal, ray.direction));
+        Vec3f dir_tan0 = {};
+        if (fabsf(dir_normal.x) >= fabsf(dir_normal.y) && fabsf(dir_normal.x) >= fabsf(dir_normal.z)) {
+            dir_tan0.x =   dir_normal.y;
+            dir_tan0.y = - dir_normal.x;
+            dir_tan0.z = 0;
+        } else if (fabsf(dir_normal.y) >= fabsf(dir_normal.x) && fabsf(dir_normal.y) >= fabsf(dir_normal.z)) {
+            dir_tan0.x =   dir_normal.y;
+            dir_tan0.y = - dir_normal.x;
+            dir_tan0.z = 0;
+        } else if (fabsf(dir_normal.z) >= fabsf(dir_normal.x) && fabsf(dir_normal.z) >= fabsf(dir_normal.y)) {
+            dir_tan0.x = 0;
+            dir_tan0.y = - dir_normal.z;
+            dir_tan0.z = dir_normal.y;
+        }
+        dir_tan0 = normalize(dir_tan0);
+        Vec3f dir_tan1 = cross3f(dir_normal, dir_tan0);
+
+        Vec3f point_on_sphere = add3f(scale3f(dir_normal, - point_on_hemi_sphere.z),
+                                add3f(scale3f(dir_tan0, - point_on_hemi_sphere.y),
+                                scale3f(dir_tan1, - point_on_hemi_sphere.x)));
+
+        point_on_sphere = scale3f(normalize(point_on_sphere), light->radius);
+
+        Vec3f target_on_light = add3f(point_on_sphere, light->center);
+
+        Vec3f light_path = sub3f(target_on_light, previous_ray_result.intersection_point);
+        Vec3f light_direction = normalize(light_path);
+
+        float scale = dot3f(light_direction, previous_ray_result.surface_normal);
+        if (scale < 0) continue;
+
+        Ray ray = {
+            .origin = previous_ray_result.intersection_point,
+            .direction = light_direction,
+        };
+
+        Ray_Result ray_result = find_ray_hit(scene, ray, norm(light_path));
+
+        if (ray_result.hit) continue;
+
+        float power = light->albedo / (4.0f * M_PI * norm2(light_path));
+        Vec3f final_light_color = scale3f(light->color, power * scale);
+        total_contribution = add3f(total_contribution, final_light_color);
+    }
+
+    return total_contribution;
 }
 
 Vec3f raytrace_ray(Job *job, Scene *scene, Ray ray)
@@ -155,13 +277,34 @@ Vec3f raytrace_ray(Job *job, Scene *scene, Ray ray)
     bool within_transparent_object = false;
 
     for (int ray_count = 0; ray_count < 64; ray_count++) {
-        Ray_Result ray_result = find_ray_hit(scene, ray);
+        Ray_Result ray_result = find_ray_hit(scene, ray, FLT_MAX);
 
         if (!ray_result.hit) break;
 
         Material *material = scene->materials + ray_result.material_id;
 
-        if (material->transparent) {
+        if (ray_result.object_type == LIGHT) {
+            Light *light = scene->lights + ray_result.object_id;
+            float dist = ray_result.t_min;
+            float scale = light->albedo / (4.0f * M_PI * ray_result.t_min * ray_result.t_min);
+
+            Vec3f light_color = scale3f(light->color, scale);
+
+            accumulated_color = add3f(accumulated_color, mul3f(color_scale, light_color));
+
+            // Lorsque qu'on atteint une lumière de force, il n'y a plus de réflexions.
+            break;
+        } else if (material->mirror) {
+            color_scale = mul3f(color_scale, material->mirror_color);
+
+            Vec3f incident_normal = project3f(ray_result.surface_normal, ray.direction);
+            Vec3f incident_tangent = sub3f(ray.direction, incident_normal);
+
+            Vec3f new_dir = sub3f(incident_tangent, scale3f(incident_normal, 2.0f));
+
+            ray.origin = ray_result.intersection_point;
+            ray.direction = new_dir;
+        } else if (material->transparent) {
             Vec3f incident_normal = project3f(ray_result.surface_normal, ray.direction);
             Vec3f incident_tangent = sub3f(ray.direction, incident_normal);
 
@@ -183,42 +326,13 @@ Vec3f raytrace_ray(Job *job, Scene *scene, Ray ray)
                 ray.direction = add3f(transmited_normal, transmited_tangent);
             }
         } else { // Non transparent material.
-            Light light = {
-                .position = {-10, 20, 40},
-                .color = WHITE,
-                .intensity = 5e4f,
-            };
+            Vec3f light_color = compute_light_contribution(job, scene, ray, ray_result);
+            accumulated_color = add3f(accumulated_color, mul3f(color_scale, mul3f(light_color, material->diffuse_color)));
 
-            Ray ray_to_light = {
-                .origin = ray_result.intersection_point,
-                .direction = normalize(sub3f(light.position, ray_result.intersection_point)),
-            };
-
-            Ray_Result light_ray_result = find_ray_hit(scene, ray_to_light);
-
-            Vec3f light_path = sub3f(ray_result.intersection_point, light.position);
-            Vec3f light_direction = normalize(light_path);
-
-            float dist2 = norm2(light_path);
-
-            if (!light_ray_result.hit || light_ray_result.t_min * light_ray_result.t_min > dist2) {
-                float power = light.intensity / (4.0f * M_PI * dist2);
-
-                // Vec3f max_light_direction = add3f(light_direction, scale3f(ray_result.surface_normal, - 2 * dot3f(ray_result.surface_normal, light_direction)));
-                // float scale = - dot3f(max_light_direction, direction);
-                float scale = - dot3f(light_direction, ray_result.surface_normal);
-                if (scale < 0) scale = 0;
-
-                Vec3f final_light_color = scale3f(light.color, power * scale);
-                Vec3f color = mul3f(final_light_color, material->diffuse_color);
-                
-                accumulated_color = add3f(accumulated_color, mul3f(color_scale, color));
-            }
-
-            color_scale = mul3f(color_scale, material->mirror_color);
+            color_scale = mul3f(color_scale, material->diffuse_color);
 
             // Si on ajoute plus assez de lumière après chaque rebond, on arrête
-            if (norm2(color_scale) < 1e-3) break;
+            if (norm2(color_scale) < 1e-6) break;
 
             ray.origin = ray_result.intersection_point;
 
@@ -244,6 +358,7 @@ Vec3f raytrace_ray(Job *job, Scene *scene, Ray ray)
                 dir_tan0.y = - dir_normal.z;
                 dir_tan0.z = dir_normal.y;
             }
+            dir_tan0 = normalize(dir_tan0);
             Vec3f dir_tan1 = cross3f(dir_normal, dir_tan0);
 
             Vec3f new_dir = add3f(scale3f(dir_normal, random_direction.z),
@@ -254,7 +369,11 @@ Vec3f raytrace_ray(Job *job, Scene *scene, Ray ray)
 
             color_scale = scale3f(color_scale, dot3f(new_dir, dir_normal));
 
-            ray.direction = new_dir; // add3f(ray.direction, scale3f(new_dir, -2.0f));
+            // Si on ajoute plus assez de lumière après chaque rebond, on arrête
+            if (norm2(color_scale) < 1e-6) break;
+
+            ray.direction = new_dir;
+            // ray.direction = add3f(ray.direction, scale3f(new_dir, -2.0f));
         }
     }
 
@@ -359,39 +478,40 @@ int main()
     Material materials[] = {
         {   // The sphere in the center of the scene.
             .diffuse_color = scale3f(WHITE, 0.5f),
-            .mirror_color = scale3f(WHITE, 0.1f),
+            .mirror = false,
         },
         {   // The background wall.
             .diffuse_color = GREEN,
-            .mirror_color = BLACK,
+            .mirror = false,
         },
         {   // The ground.
             .diffuse_color = BLUE,
-            .mirror_color = BLACK,
+            .mirror = false,
         },
         {   // Left wall.
             .diffuse_color = PINK,
-            .mirror_color = BLACK,
+            .mirror = false,
         },
         {   // Right Wall.
             .diffuse_color = YELLOW,
-            .mirror_color = BLACK,
+            .mirror = false,
         },
         {   // Perfect mirror sphere.
             .diffuse_color = BLACK,
+            .mirror = true,
             .mirror_color = WHITE,
         },
         {   // Ceilling.
             .diffuse_color = RED,
-            .mirror_color = BLACK,
+            .mirror = false,
         },
         {   // Transparent sphere.
             .diffuse_color = BLACK,
-            .mirror_color = BLACK,
+            .mirror = false,
 
             .transparent = true,
             .n = 1.5f,
-        },
+        }
     };
 
     Sphere spheres[] = {
@@ -442,6 +562,15 @@ int main()
         },
     };
 
+    Light lights[] = {
+        {
+            .center = {-10.0f, 20.0f, 40.0f},
+            .radius = 3.0f,
+            .color = WHITE,
+            .albedo = 1e5f,
+        }
+    };
+
     Scene scene = {
         .camera = {
             .position = {0.0f, 10.0f, 55.0f},
@@ -458,9 +587,12 @@ int main()
 
         .plane_count = ARRAY_SIZE(planes),
         .planes = planes,
+
+        .light_count = ARRAY_SIZE(lights),
+        .lights = lights,
     };
 
-    if(USE_THREADS) {
+    if (USE_THREADS) {
         pthread_t threads[16] = {};
         Job jobs[16] = {};
 
@@ -475,7 +607,7 @@ int main()
                     .point = {i * block_width, j * block_height},
                     .size = {block_width, block_height}
                 };
-                jobs[4 * i +j].ray_per_pixel = 256;
+                jobs[4 * i +j].ray_per_pixel = 1024;
                 jobs[4 * i +j].serie = create_random_serie();
 
                 int code = pthread_create(&threads[4 * i + j], NULL, (void*)raytrace_region, &jobs[4 * i + j]);

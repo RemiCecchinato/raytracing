@@ -15,6 +15,9 @@ typedef struct Scene
 
     int32_t plane_count;
     Plane   *planes;
+
+    int32_t light_count;
+    Light  *lights;
 } Scene;
 
 typedef struct Ray
@@ -23,9 +26,18 @@ typedef struct Ray
     Vec3f direction;
 } Ray;
 
+typedef enum Object_Type
+{
+    SPHERE,
+    PLANE,
+    LIGHT,
+} Object_Type;
+
 typedef struct Ray_Result
 {
     bool hit;
+    Object_Type object_type;
+    uint32_t object_id;
 
     // infos géométriques
     Vec3f intersection_point;

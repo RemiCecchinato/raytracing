@@ -88,17 +88,12 @@ typedef struct Image3f
     Vec3f *pixels;
 } Image3f;
 
-typedef struct Light
-{
-    Vec3f position;
-    Vec3f color;
-    float intensity;
-} Light;
-
 typedef struct Material
 {
     // reflection information
     Vec3f diffuse_color;
+
+    bool mirror;
     Vec3f mirror_color;
 
     // transparancy information
@@ -112,6 +107,14 @@ typedef struct Sphere
     float radius;
     int32_t material_id;
 } Sphere;
+
+typedef struct Light
+{
+    Vec3f center;
+    float radius;
+    Vec3f color;
+    float albedo;
+} Light;
 
 typedef struct Plane
 {
