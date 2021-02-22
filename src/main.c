@@ -596,6 +596,30 @@ void raytrace_region(Job *job)
     }
 }
 
+const    uint32_t REGION_SPLIT_SIZE = 16;
+volatile uint32_t region_count = 0;
+volatile uint32_t finished = 0;
+
+void thread_entry_point(Job *job)
+{
+    for (;;) {
+        uint32_t region = __sync_fetch_and_add(&region_count, 1);
+
+        if (region >= REGION_SPLIT_SIZE * REGION_SPLIT_SIZE) return;
+
+        uint32_t x = region % REGION_SPLIT_SIZE;
+        uint32_t y = region / REGION_SPLIT_SIZE;
+
+        job->region.point.x = x * job->region.size.x;
+        job->region.point.y = y * job->region.size.y;
+
+        raytrace_region(job);
+
+        uint32_t finished_regions = __sync_fetch_and_add(&finished, 1);
+        printf("Finished %d regions out of %d.\n", finished_regions+1, REGION_SPLIT_SIZE * REGION_SPLIT_SIZE);
+    }
+}
+
 int main()
 {
 #if 0
@@ -824,6 +848,7 @@ int main()
         uint32_t block_width = width / 4;
         uint32_t block_height = height / 4;
 
+#if 0
         for (int i = 0; i < 4; i++) {
             for (int j = 0; j < 4; j++) {
                 jobs[4 * i + j].scene = &scene;
@@ -842,6 +867,22 @@ int main()
                 }
             }
         }
+#else
+        for (int i = 0; i < 16; i++) {
+            jobs[i].scene = &scene;
+            jobs[i].image = &dest_image;
+            jobs[i].region.size.x = width / REGION_SPLIT_SIZE;
+            jobs[i].region.size.y = height / REGION_SPLIT_SIZE;
+            jobs[i].ray_per_pixel = 256;
+            jobs[i].serie = create_random_serie();
+
+            int code = pthread_create(&threads[i], NULL, (void*)thread_entry_point, &jobs[i]);
+            if (0 != code) {
+                printf("Error creating thread.\n");
+                exit(-1);
+            }
+        }
+#endif
 
         for (int i = 0; i < 16; i++) {
             pthread_join(threads[i], NULL);
