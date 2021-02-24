@@ -93,6 +93,16 @@ typedef struct Bounding_Box
     Vec3f max;
 } Bounding_Box;
 
+typedef struct Mesh_Node
+{
+    Bounding_Box bbox;
+
+    struct Mesh_Node *childs;
+
+    uint32_t first_triangle_id;
+    uint32_t last_triangle_id;
+} Mesh_Node;
+
 typedef struct Mesh
 {
     uint32_t point_count;
@@ -107,7 +117,8 @@ typedef struct Mesh
     uint32_t  face_count;
     Triangle *faces;
 
-    Bounding_Box bbox;
+    uint32_t tree_depth;
+    Mesh_Node root;
 } Mesh;
 
 typedef struct Camera

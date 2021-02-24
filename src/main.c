@@ -70,12 +70,97 @@ bool save_image(char *filename, Image3f *image)
     return true;
 }
 
+void split_mesh_node(Mesh_Node *node, Mesh *mesh, int depth)
+{
+    mesh->tree_depth = MAX(mesh->tree_depth, depth);
+
+    node->bbox.min.x =  FLT_MAX;
+    node->bbox.min.y =  FLT_MAX;
+    node->bbox.min.z =  FLT_MAX;
+    node->bbox.max.x = -FLT_MAX;
+    node->bbox.max.y = -FLT_MAX;
+    node->bbox.max.z = -FLT_MAX;
+
+    for (uint32_t i = node->first_triangle_id; i <= node->last_triangle_id; i++) {
+        Triangle *triangle = mesh->faces + i;
+
+        for (int j = 0; j < 3; j++) {
+            uint32_t vertex_id = triangle->ids[j].vertexId;
+            
+            node->bbox.min.x = MIN(node->bbox.min.x, mesh->points[vertex_id].x);
+            node->bbox.min.y = MIN(node->bbox.min.y, mesh->points[vertex_id].y);
+            node->bbox.min.z = MIN(node->bbox.min.z, mesh->points[vertex_id].z);
+
+            node->bbox.max.x = MAX(node->bbox.max.x, mesh->points[vertex_id].x);
+            node->bbox.max.y = MAX(node->bbox.max.y, mesh->points[vertex_id].y);
+            node->bbox.max.z = MAX(node->bbox.max.z, mesh->points[vertex_id].z);
+        }
+    }
+
+    // Si il y a moins que 5 triangles, on ne divise pas le noeud.
+    if (node->last_triangle_id - node->first_triangle_id + 1 <= 16) {
+        return;
+    }
+
+    int maxdim = 0;
+    if (node->bbox.max.coord[1] - node->bbox.min.coord[1] > node->bbox.max.coord[maxdim] - node->bbox.min.coord[maxdim]) {
+        maxdim = 1;
+    }
+    if (node->bbox.max.coord[2] - node->bbox.min.coord[2] > node->bbox.max.coord[maxdim] - node->bbox.min.coord[maxdim]) {
+        maxdim = 2;
+    }
+
+    float middle = (node->bbox.max.coord[maxdim] + node->bbox.min.coord[maxdim]) / 2;
+
+    int pivot = node->first_triangle_id;
+    for (;;) {
+        for (uint32_t i = node->first_triangle_id; i <= node->last_triangle_id; i++) {
+            Triangle *triangle = mesh->faces + i;
+
+            float center = 0;
+            for (int j = 0; j < 3; j++) {
+                center += mesh->points[triangle->ids[j].vertexId].coord[maxdim] / 3;
+            }
+
+            if (center < middle) {
+                Triangle tmp = mesh->faces[pivot];
+                mesh->faces[pivot] = mesh->faces[i];
+                mesh->faces[i] = tmp;
+
+                pivot++;
+            }
+        }
+
+        if (pivot == node->first_triangle_id) {
+            middle = (middle + node->bbox.max.coord[maxdim]) / 2;
+        } else if (pivot == node->last_triangle_id + 1) {
+            middle = (node->bbox.min.coord[maxdim] + middle) / 2;
+            pivot = node->first_triangle_id;
+        } else {
+            break;
+        }
+    }
+
+    assert(pivot != node->first_triangle_id);
+    assert(pivot != node->last_triangle_id+1);
+
+    node->childs = calloc(1, 2 * sizeof(*node->childs));
+
+    node->childs[0].first_triangle_id = node->first_triangle_id;
+    node->childs[0].last_triangle_id  = pivot - 1;
+    node->childs[1].first_triangle_id = pivot;
+    node->childs[1].last_triangle_id  = node->last_triangle_id;
+
+    split_mesh_node(node->childs + 0, mesh, depth + 1);
+    split_mesh_node(node->childs + 1, mesh, depth + 1);
+}
+
 Mesh load_mesh(char *filename)
 {
     fastObjMesh* fastMesh = fast_obj_read(filename);
     assert(fastMesh);
 
-    Mesh mesh;
+    Mesh mesh = {};
     mesh.point_count    = fastMesh->position_count;
     mesh.points         = (Vec3f*)fastMesh->positions;
     mesh.texcoord_count = fastMesh->texcoord_count;
@@ -93,23 +178,6 @@ Mesh load_mesh(char *filename)
         float t = mesh.points[i].x;
         mesh.points[i].x = mesh.points[i].z;
         mesh.points[i].z = t;
-    }
-
-    mesh.bbox.min.x =  FLT_MAX;
-    mesh.bbox.min.y =  FLT_MAX;
-    mesh.bbox.min.z =  FLT_MAX;
-    mesh.bbox.max.x = -FLT_MAX;
-    mesh.bbox.max.y = -FLT_MAX;
-    mesh.bbox.max.z = -FLT_MAX;
-
-    for (uint32_t i = 0; i < mesh.point_count; i++) {
-        mesh.bbox.min.x = MIN(mesh.bbox.min.x, mesh.points[i].x);
-        mesh.bbox.min.y = MIN(mesh.bbox.min.y, mesh.points[i].y);
-        mesh.bbox.min.z = MIN(mesh.bbox.min.z, mesh.points[i].z);
-
-        mesh.bbox.max.x = MAX(mesh.bbox.max.x, mesh.points[i].x);
-        mesh.bbox.max.y = MAX(mesh.bbox.max.y, mesh.points[i].y);
-        mesh.bbox.max.z = MAX(mesh.bbox.max.z, mesh.points[i].z);
     }
 
     for (uint32_t i = 0; i < mesh.normal_count; i++) {
@@ -164,6 +232,10 @@ Mesh load_mesh(char *filename)
             .normalId   = fastMesh->indices[4 * i + 3].n,
         };
     }
+
+    mesh.root.first_triangle_id = 0;
+    mesh.root.last_triangle_id = mesh.face_count - 1;
+    split_mesh_node(&mesh.root, &mesh, 1);
 
     // fast_obj_destroy(fastMesh);
     return mesh;
@@ -280,50 +352,94 @@ Ray_Result find_ray_hit(Scene *scene, Ray ray, float max_distance)
     for (int i = 0; i < scene->mesh_count; i++) {
         Mesh *mesh = scene->meshes + i;
 
-        Vec3f t0 = div3f(sub3f(mesh->bbox.min, ray.origin), ray.direction);
-        Vec3f t1 = div3f(sub3f(mesh->bbox.max, ray.origin), ray.direction);
+        {
+            Vec3f t0 = div3f(sub3f(mesh->root.bbox.min, ray.origin), ray.direction);
+            Vec3f t1 = div3f(sub3f(mesh->root.bbox.max, ray.origin), ray.direction);
 
-        Vec3f tmin = min3f(t0, t1);
-        Vec3f tmax = max3f(t0, t1);
+            Vec3f tmin = min3f(t0, t1);
+            Vec3f tmax = max3f(t0, t1);
 
-        float t_min = MAX(MAX(tmin.x, tmin.y), tmin.z);
-        float t_max = MIN(MIN(tmax.x, tmax.y), tmax.z);
+            float t_min = MAX(MAX(tmin.x, tmin.y), tmin.z);
+            float t_max = MIN(MIN(tmax.x, tmax.y), tmax.z);
 
-        if (t_max < t_min) continue;
+            if (t_max < t_min) continue;
 
-        for (int j = 0; j < mesh->face_count; j++) {
-            Vec3f a = mesh->points[mesh->faces[j].ids[0].vertexId];
-            Vec3f b = mesh->points[mesh->faces[j].ids[1].vertexId];
-            Vec3f c = mesh->points[mesh->faces[j].ids[2].vertexId];
+            if (t_min > result.t_min) continue;
+        }
 
-            Vec3f e1 = sub3f(b, a);
-            Vec3f e2 = sub3f(c, a);
+        int stack_head = 0;
+        Mesh_Node **stack = alloca(sizeof(*stack) * (mesh->tree_depth + 1));
+        stack[stack_head] = &mesh->root;
 
-            Vec3f o = ray.origin;
-            Vec3f u = ray.direction;
+        while (stack_head >= 0) {
+            Mesh_Node *node = stack[stack_head--];
 
-            Vec3f oau = cross3f(sub3f(o, a), u);
-            Vec3f n = cross3f(e1, e2);
+            if (node->childs) {
+                {
+                    Vec3f t0 = div3f(sub3f(node->childs[0].bbox.min, ray.origin), ray.direction);
+                    Vec3f t1 = div3f(sub3f(node->childs[0].bbox.max, ray.origin), ray.direction);
 
-            float t     = - dot3f(sub3f(o, a), n) / dot3f(u, n);
-            if (t < 1e-3) continue;
-            if (t > result.t_min) continue;
+                    Vec3f tmin = min3f(t0, t1);
+                    Vec3f tmax = max3f(t0, t1);
 
-            float beta  = - dot3f(e2, oau) / dot3f(u, n);
-            float gamma =   dot3f(e1, oau) / dot3f(u, n);
+                    float t_min = MAX(MAX(tmin.x, tmin.y), tmin.z);
+                    float t_max = MIN(MIN(tmax.x, tmax.y), tmax.z);
 
-            if ((beta < 0)  || (beta > 1))  continue;
-            if ((gamma < 0) || (gamma > 1)) continue;
-            if (beta + gamma > 1) continue;
+                    if ((t_min < t_max) && (t_min < result.t_min)) {
+                        stack[++stack_head] = node->childs + 0;
+                    }
+                }
 
-            result.hit = true;
-            result.t_min = t;
-            result.object_type = TRIANGLE;
-            result.object_id = j;
-            result.mesh_id = i;
-            result.triangle_beta  = beta;
-            result.triangle_gamma = gamma;
-            result.material_id = 8; // !!!!!!!!!!!!
+                {
+                    Vec3f t0 = div3f(sub3f(node->childs[1].bbox.min, ray.origin), ray.direction);
+                    Vec3f t1 = div3f(sub3f(node->childs[1].bbox.max, ray.origin), ray.direction);
+
+                    Vec3f tmin = min3f(t0, t1);
+                    Vec3f tmax = max3f(t0, t1);
+
+                    float t_min = MAX(MAX(tmin.x, tmin.y), tmin.z);
+                    float t_max = MIN(MIN(tmax.x, tmax.y), tmax.z);
+
+                    if ((t_min < t_max) && (t_min < result.t_min)) {
+                        stack[++stack_head] = node->childs + 1;
+                    }
+                }
+            } else {
+                for (int j = node->first_triangle_id; j <= node->last_triangle_id; j++) {
+                    Vec3f a = mesh->points[mesh->faces[j].ids[0].vertexId];
+                    Vec3f b = mesh->points[mesh->faces[j].ids[1].vertexId];
+                    Vec3f c = mesh->points[mesh->faces[j].ids[2].vertexId];
+
+                    Vec3f e1 = sub3f(b, a);
+                    Vec3f e2 = sub3f(c, a);
+
+                    Vec3f o = ray.origin;
+                    Vec3f u = ray.direction;
+
+                    Vec3f oau = cross3f(sub3f(o, a), u);
+                    Vec3f n = cross3f(e1, e2);
+
+                    float t     = - dot3f(sub3f(o, a), n) / dot3f(u, n);
+                    if (t < 1e-3) continue;
+                    if (t > result.t_min) continue;
+
+                    float beta  = - dot3f(e2, oau) / dot3f(u, n);
+                    float gamma =   dot3f(e1, oau) / dot3f(u, n);
+
+                    if ((beta < 0)  || (beta > 1))  continue;
+                    if ((gamma < 0) || (gamma > 1)) continue;
+                    if (beta + gamma > 1) continue;
+
+                    result.hit = true;
+                    result.t_min = t;
+                    result.object_type = TRIANGLE;
+                    result.object_id = j;
+                    result.mesh_id = i;
+                    result.triangle_beta  = beta;
+                    result.triangle_gamma = gamma;
+                    result.material_id = 8; // !!!!!!!!!!!!
+                }
+            }
         }
     }
 
