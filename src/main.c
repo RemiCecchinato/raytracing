@@ -374,6 +374,8 @@ Ray_Result find_ray_hit(Scene *scene, Ray ray, float max_distance)
         while (stack_head >= 0) {
             Mesh_Node *node = stack[stack_head--];
 
+            float t_min0, t_min1;
+            bool hit0 = false, hit1 = false;
             if (node->childs) {
                 {
                     Vec3f t0 = div3f(sub3f(node->childs[0].bbox.min, ray.origin), ray.direction);
@@ -386,7 +388,8 @@ Ray_Result find_ray_hit(Scene *scene, Ray ray, float max_distance)
                     float t_max = MIN(MIN(tmax.x, tmax.y), tmax.z);
 
                     if ((t_min < t_max) && (t_min < result.t_min)) {
-                        stack[++stack_head] = node->childs + 0;
+                        t_min0 = t_min;
+                        hit0 = true;
                     }
                 }
 
@@ -401,8 +404,23 @@ Ray_Result find_ray_hit(Scene *scene, Ray ray, float max_distance)
                     float t_max = MIN(MIN(tmax.x, tmax.y), tmax.z);
 
                     if ((t_min < t_max) && (t_min < result.t_min)) {
-                        stack[++stack_head] = node->childs + 1;
+                        t_min1 = t_min;
+                        hit1 = true;
                     }
+                }
+
+                if (hit0 && hit1) {
+                    if (t_min0 > t_min1) {
+                        stack[++stack_head] = node->childs + 0;
+                        stack[++stack_head] = node->childs + 1;
+                    } else {
+                        stack[++stack_head] = node->childs + 1;
+                        stack[++stack_head] = node->childs + 0;
+                    }
+                } else if (hit0) {
+                    stack[++stack_head] = node->childs + 0;
+                } else if (hit1) {
+                    stack[++stack_head] = node->childs + 1;
                 }
             } else {
                 for (int j = node->first_triangle_id; j <= node->last_triangle_id; j++) {
@@ -989,7 +1007,7 @@ int main()
             jobs[i].image = &dest_image;
             jobs[i].region.size.x = width / REGION_SPLIT_SIZE;
             jobs[i].region.size.y = height / REGION_SPLIT_SIZE;
-            jobs[i].ray_per_pixel = 256;
+            jobs[i].ray_per_pixel = 1024;
             jobs[i].serie = create_random_serie();
 
             int code = pthread_create(&threads[i], NULL, (void*)thread_entry_point, &jobs[i]);
