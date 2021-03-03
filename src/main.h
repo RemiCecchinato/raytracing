@@ -50,8 +50,11 @@ typedef struct Ray_Result
     Vec3f surface_normal;
     float t_min;
 
+    float triangle_alpha;
     float triangle_beta;
     float triangle_gamma;
+    Vec2f triangle_uv;
+
 
     bool enter_shape;
 

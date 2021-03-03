@@ -146,6 +146,10 @@ typedef struct Material
     // transparancy information
     bool transparent;
     float n;
+
+    // texture information
+    bool textured;
+    Image3f *texture;
 } Material;
 
 typedef struct Sphere

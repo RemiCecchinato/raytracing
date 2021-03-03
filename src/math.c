@@ -266,3 +266,33 @@ Vec3f random3f_sphere(Random_Serie *serie, float radius)
 
     return result;
 }
+
+Vec3f sample_texture(Image3f *texture, Vec2f uv)
+{
+    int ui = uv.x * (texture->size.x - 0.5);
+    int vi = uv.y * (texture->size.y - 0.5);
+
+    Vec3f color = texture->pixels[vi * texture->size.x + ui];
+    return color;
+}
+
+Vec3f interpolate_triangle3f(Vec3f a, Vec3f b, Vec3f c, Vec3f d)
+{
+    Vec3f result = {
+        .x = a.x * d.x + b.x * d.y + c.x * d.z,
+        .y = a.y * d.x + b.y * d.y + c.y * d.z,
+        .z = a.z * d.x + b.z * d.y + c.z * d.z,
+    };
+
+    return result;
+}
+
+Vec2f interpolate_triangle2f(Vec2f a, Vec2f b, Vec2f c, Vec3f d)
+{
+    Vec2f result = {
+        .x = a.x * d.x + b.x * d.y + c.x * d.z,
+        .y = a.y * d.x + b.y * d.y + c.y * d.z,
+    };
+
+    return result;
+}

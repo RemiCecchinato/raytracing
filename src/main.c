@@ -13,10 +13,9 @@
 #define STB_IMAGE_WRITE_IMPLEMENTATION
 #include "stb_image_write.h"
 
-#if 0
+
 #define STB_IMAGE_IMPLEMENTATION
 #include "stb_image.h"
-#endif
 
 // Mes headers
 #include "main.h"
@@ -42,6 +41,32 @@ Image3f create_blank_image(uint32_t width, uint32_t height)
 
     return image;
 };
+
+Image3f load_texture(char *filename)
+{
+    int channels = 0, width = 0, height = 0;
+    uint8_t *pixels = stbi_load(filename, &width, &height, &channels, 0);
+
+    Image3f texture = create_blank_image(width, height);
+
+    uint32_t pixel_count = texture.size.x * texture.size.y;
+    for (uint32_t j = 0; j < texture.size.y; j++) {
+        for (uint32_t i = 0; i < texture.size.x; i++) {
+            texture.pixels[texture.size.x * (texture.size.y - 1 - j) + i].r = powf(pixels[3 * (texture.size.x * j + i) + 0] / 255.0f, 2.2f);
+            texture.pixels[texture.size.x * (texture.size.y - 1 - j) + i].g = powf(pixels[3 * (texture.size.x * j + i) + 1] / 255.0f, 2.2f);
+            texture.pixels[texture.size.x * (texture.size.y - 1 - j) + i].b = powf(pixels[3 * (texture.size.x * j + i) + 2] / 255.0f, 2.2f);
+        }
+    }
+    
+    // for (uint32_t i = 0; i < pixel_count; i++) {
+    //     texture.pixels[i].r = (float)pixels[3 * i + 0] / 255.0f;
+    //     texture.pixels[i].g = (float)pixels[3 * i + 1] / 255.0f;
+    //     texture.pixels[i].b = (float)pixels[3 * i + 2] / 255.0f;
+    // }
+
+    free(pixels);
+    return texture;
+}
 
 bool save_image(char *filename, Image3f *image)
 {
@@ -412,10 +437,10 @@ Ray_Result find_ray_hit(Scene *scene, Ray ray, float max_distance)
                 if (hit0 && hit1) {
                     if (t_min0 > t_min1) {
                         stack[++stack_head] = node->childs + 0;
-                        stack[++stack_head] = node->childs + 1;
+                        stack[++stack_head] = node->childs + 1; // LIFO
                     } else {
                         stack[++stack_head] = node->childs + 1;
-                        stack[++stack_head] = node->childs + 0;
+                        stack[++stack_head] = node->childs + 0; // LIFO
                     }
                 } else if (hit0) {
                     stack[++stack_head] = node->childs + 0;
@@ -479,15 +504,23 @@ Ray_Result find_ray_hit(Scene *scene, Ray ray, float max_distance)
                 Mesh *mesh = scene->meshes + result.mesh_id;
                 Triangle *triangle = mesh->faces + result.object_id;
 
-                float beta = result.triangle_beta;
-                float gamma = result.triangle_gamma;
-                float alpha = 1 - beta - gamma;
+                result.triangle_alpha = 1 - result.triangle_beta - result.triangle_gamma;
 
-                Vec3f normal = add3f(add3f(
-                    scale3f(mesh->normals[triangle->ids[0].normalId], alpha),
-                    scale3f(mesh->normals[triangle->ids[1].normalId], beta)),
-                    scale3f(mesh->normals[triangle->ids[2].normalId], gamma)
-                );
+                Vec3f alpha_beta_gamma = {
+                    result.triangle_alpha,
+                    result.triangle_beta,
+                    result.triangle_gamma,
+                };
+
+                Vec3f normal0 = mesh->normals[triangle->ids[0].normalId];
+                Vec3f normal1 = mesh->normals[triangle->ids[1].normalId];
+                Vec3f normal2 = mesh->normals[triangle->ids[2].normalId];
+                Vec3f normal = interpolate_triangle3f(normal0, normal1, normal2, alpha_beta_gamma);
+
+                Vec2f uv0 = mesh->texcoords[triangle->ids[0].texcoordId];
+                Vec2f uv1 = mesh->texcoords[triangle->ids[1].texcoordId];
+                Vec2f uv2 = mesh->texcoords[triangle->ids[2].texcoordId];
+                result.triangle_uv = interpolate_triangle2f(uv0, uv1, uv2, alpha_beta_gamma);
 
                 result.intersection_point = add3f(ray.origin, scale3f(ray.direction, result.t_min));
                 result.surface_normal = normal;
@@ -629,9 +662,15 @@ Vec3f raytrace_ray(Job *job, Scene *scene, Ray ray)
             }
         } else { // Non transparent material.
             Vec3f light_color = compute_light_contribution(job, scene, ray, ray_result);
-            accumulated_color = add3f(accumulated_color, mul3f(color_scale, mul3f(light_color, material->diffuse_color)));
 
-            color_scale = mul3f(color_scale, material->diffuse_color);
+            Vec3f diffuse_color = material->diffuse_color;
+            if (material->textured) {
+                diffuse_color = sample_texture(material->texture, ray_result.triangle_uv);
+            }
+
+            accumulated_color = add3f(accumulated_color, mul3f(color_scale, mul3f(light_color, diffuse_color)));
+
+            color_scale = mul3f(color_scale, diffuse_color);
 
             // Si on ajoute plus assez de lumière après chaque rebond, on arrête
             if (norm2(color_scale) < 1e-6) break;
@@ -797,6 +836,8 @@ int main()
     return 0;
 #endif
 
+    Image3f texture = load_texture("models/Australian_Cattle_Dog_v1_L3.123c9c6a5764-399b-4e86-9897-6bcb08b5e8ed/Australian_Cattle_Dog_dif.jpg");
+
     int width = 512, height = 512;
 
     Image3f dest_image = create_blank_image(width, height);
@@ -841,6 +882,9 @@ int main()
         {
             .diffuse_color = WHITE,
             .mirror = false,
+
+            .textured = true,
+            .texture  = &texture,
         },
     };
 
@@ -901,53 +945,8 @@ int main()
         }
     };
 
-#if 0
-    Vec3f mesh_points[] = {
-        {0, 0, 0},
-        {-8, 10, 15},
-        {-4, 5, 25}
-    };
-
-    Vec2f mesh_texcoords[] = {
-        {0, 0},
-        {1, 0},
-        {0, 1},
-    };
-
-    Vec3f mesh_normals[] = {
-        {0, 0, 1},
-        {0, 1, 0},
-        {1, 0, 0},
-    };
-
-    Triangle mesh_faces[] = {
-        {
-            .ids = {
-                {0, 0, 0},
-                {1, 1, 1},
-                {2, 2, 2},
-            }
-        }
-    };
-#endif
-
     Mesh meshes[] = {
         load_mesh("models/dog.obj"),
-#if 0
-        {
-            .point_count = ARRAY_SIZE(mesh_points),
-            .points = mesh_points,
-
-            .texcoord_count = ARRAY_SIZE(mesh_texcoords),
-            .texcoords = mesh_texcoords,
-
-            .normal_count = ARRAY_SIZE(mesh_normals),
-            .normals = mesh_normals,
-
-            .face_count = ARRAY_SIZE(mesh_faces),
-            .faces = mesh_faces,
-        },
-#endif
     };
     printf("face_count : %d\n", meshes[0].face_count);
 
@@ -1007,7 +1006,7 @@ int main()
             jobs[i].image = &dest_image;
             jobs[i].region.size.x = width / REGION_SPLIT_SIZE;
             jobs[i].region.size.y = height / REGION_SPLIT_SIZE;
-            jobs[i].ray_per_pixel = 1024;
+            jobs[i].ray_per_pixel = 2048;
             jobs[i].serie = create_random_serie();
 
             int code = pthread_create(&threads[i], NULL, (void*)thread_entry_point, &jobs[i]);
