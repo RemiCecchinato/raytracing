@@ -75,6 +75,13 @@ typedef union Vec4f
     };
 } Vec4f;
 
+typedef struct Transform
+{
+    Vec3f position;
+
+    Vec3f rotX, rotY, rotZ;
+} Transform;
+
 typedef struct Vertex
 {
     uint32_t vertexId;
@@ -120,6 +127,14 @@ typedef struct Mesh
     uint32_t tree_depth;
     Mesh_Node root;
 } Mesh;
+
+typedef struct Scene_Mesh
+{
+    Mesh *mesh;
+    Transform transform;
+
+    uint32_t material_id;
+} Scene_Mesh;
 
 typedef struct Camera
 {

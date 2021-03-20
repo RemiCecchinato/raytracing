@@ -21,7 +21,7 @@ typedef struct Scene
     Light  *lights;
 
     int32_t mesh_count;
-    Mesh   *meshes;
+    Scene_Mesh *meshes;
 } Scene;
 
 typedef struct Ray

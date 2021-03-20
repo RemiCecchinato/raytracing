@@ -296,3 +296,17 @@ Vec2f interpolate_triangle2f(Vec2f a, Vec2f b, Vec2f c, Vec3f d)
 
     return result;
 }
+
+Ray transform_ray_to_mesh_space(Ray original_ray, Transform transform)
+{
+    Vec3f invRotX = {transform.rotX.x, transform.rotY.x, transform.rotZ.x};
+    Vec3f invRotY = {transform.rotX.y, transform.rotY.y, transform.rotZ.y};
+    Vec3f invRotZ = {transform.rotX.z, transform.rotY.z, transform.rotZ.z};
+
+    Ray result = {
+        .origin = interpolate_triangle3f(invRotX, invRotY, invRotZ, sub3f(original_ray.origin, transform.position)),
+        .direction = interpolate_triangle3f(invRotX, invRotY, invRotZ, original_ray.direction),
+    };
+
+    return result;
+}

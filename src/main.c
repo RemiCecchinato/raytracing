@@ -370,11 +370,14 @@ Ray_Result find_ray_hit(Scene *scene, Ray ray, float max_distance)
 
     // On teste tous les modèles.
     for (int i = 0; i < scene->mesh_count; i++) {
-        Mesh *mesh = scene->meshes + i;
+        Scene_Mesh *scene_mesh = scene->meshes + i;
+        Mesh *mesh = scene_mesh->mesh;
+
+        Ray mesh_ray = transform_ray_to_mesh_space(ray, scene_mesh->transform);
 
         {
-            Vec3f t0 = div3f(sub3f(mesh->root.bbox.min, ray.origin), ray.direction);
-            Vec3f t1 = div3f(sub3f(mesh->root.bbox.max, ray.origin), ray.direction);
+            Vec3f t0 = div3f(sub3f(mesh->root.bbox.min, mesh_ray.origin), mesh_ray.direction);
+            Vec3f t1 = div3f(sub3f(mesh->root.bbox.max, mesh_ray.origin), mesh_ray.direction);
 
             Vec3f tmin = min3f(t0, t1);
             Vec3f tmax = max3f(t0, t1);
@@ -398,8 +401,8 @@ Ray_Result find_ray_hit(Scene *scene, Ray ray, float max_distance)
             bool hit0 = false, hit1 = false;
             if (node->childs) {
                 {
-                    Vec3f t0 = div3f(sub3f(node->childs[0].bbox.min, ray.origin), ray.direction);
-                    Vec3f t1 = div3f(sub3f(node->childs[0].bbox.max, ray.origin), ray.direction);
+                    Vec3f t0 = div3f(sub3f(node->childs[0].bbox.min, mesh_ray.origin), mesh_ray.direction);
+                    Vec3f t1 = div3f(sub3f(node->childs[0].bbox.max, mesh_ray.origin), mesh_ray.direction);
 
                     Vec3f tmin = min3f(t0, t1);
                     Vec3f tmax = max3f(t0, t1);
@@ -414,8 +417,8 @@ Ray_Result find_ray_hit(Scene *scene, Ray ray, float max_distance)
                 }
 
                 {
-                    Vec3f t0 = div3f(sub3f(node->childs[1].bbox.min, ray.origin), ray.direction);
-                    Vec3f t1 = div3f(sub3f(node->childs[1].bbox.max, ray.origin), ray.direction);
+                    Vec3f t0 = div3f(sub3f(node->childs[1].bbox.min, mesh_ray.origin), mesh_ray.direction);
+                    Vec3f t1 = div3f(sub3f(node->childs[1].bbox.max, mesh_ray.origin), mesh_ray.direction);
 
                     Vec3f tmin = min3f(t0, t1);
                     Vec3f tmax = max3f(t0, t1);
@@ -451,8 +454,8 @@ Ray_Result find_ray_hit(Scene *scene, Ray ray, float max_distance)
                     Vec3f e1 = sub3f(b, a);
                     Vec3f e2 = sub3f(c, a);
 
-                    Vec3f o = ray.origin;
-                    Vec3f u = ray.direction;
+                    Vec3f o = mesh_ray.origin;
+                    Vec3f u = mesh_ray.direction;
 
                     Vec3f oau = cross3f(sub3f(o, a), u);
                     Vec3f n = cross3f(e1, e2);
@@ -475,7 +478,7 @@ Ray_Result find_ray_hit(Scene *scene, Ray ray, float max_distance)
                     result.mesh_id = i;
                     result.triangle_beta  = beta;
                     result.triangle_gamma = gamma;
-                    result.material_id = 8; // !!!!!!!!!!!!
+                    result.material_id = scene_mesh->material_id;
                 }
             }
         }
@@ -496,7 +499,9 @@ Ray_Result find_ray_hit(Scene *scene, Ray ray, float max_distance)
                 result.surface_normal = plane->normal;
             } break;
             case TRIANGLE: {
-                Mesh *mesh = scene->meshes + result.mesh_id;
+                Scene_Mesh *scene_mesh = scene->meshes + result.mesh_id;
+                Mesh *mesh = scene_mesh->mesh;
+                Transform *transform = &scene_mesh->transform;
                 Triangle *triangle = mesh->faces + result.object_id;
 
                 result.triangle_alpha = 1 - result.triangle_beta - result.triangle_gamma;
@@ -518,7 +523,7 @@ Ray_Result find_ray_hit(Scene *scene, Ray ray, float max_distance)
                 result.triangle_uv = interpolate_triangle2f(uv0, uv1, uv2, alpha_beta_gamma);
 
                 result.intersection_point = add3f(ray.origin, scale3f(ray.direction, result.t_min));
-                result.surface_normal = normal;
+                result.surface_normal = interpolate_triangle3f(transform->rotX, transform->rotY, transform->rotZ, normal);
             } break;
             case LIGHT: {
                 // Rien à calculer.
@@ -950,21 +955,51 @@ int main()
 
     Light lights[] = {
         {
-            .center = {-10.0f, 20.0f, 40.0f},
+            .center = {-10.0f, 20.0f, 75.0f},
             .radius = 3.0f,
             .color = WHITE,
             .albedo = 1e5f,
-        }
+        },
+        {
+            .center = {10, 17, 75},
+            .radius = 2.0f,
+            .color = {1, 0.1, 0.1},
+            .albedo = 1e4f,
+        },
     };
 
-    Mesh meshes[] = {
-        load_mesh("models/dog.obj"),
+    Mesh dog_mesh = load_mesh("models/dog.obj");
+
+    Scene_Mesh meshes[] = {
+        {
+            .mesh = &dog_mesh,
+            .material_id = 5, // Chien mirror, parce que pourquoi pas ! (Cela crée plein de caustiques cependant !)
+            .transform = {
+                .position = {-25, -10, 0},
+            
+                .rotX = {-1, 0, 0},
+                .rotY = {0, 1, 0},
+                .rotZ = {0, 0, 1},
+            },
+        },
+        {
+            .mesh = &dog_mesh,
+            .material_id = 8,
+            .transform = {
+                .position = {25, -10, 0},
+            
+                .rotX = {1, 0, 0},
+                .rotY = {0, 1, 0},
+                .rotZ = {0, 0, 1},
+            },
+        },
     };
-    printf("face_count : %d\n", meshes[0].face_count);
+    
+    
 
     Scene scene = {
         .camera = {
-            .position = {0.0f, 10.0f, 55.0f},
+            .position = {0.0f, 10.0f, 85.0f},
             .lookAt = {0.0f, 0.0f, 0.0f},
             .up = {0.0f, 1.0f, 0.0f},
             .field_of_view = 60.0f / 180.0f * M_PI,
