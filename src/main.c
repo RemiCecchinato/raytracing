@@ -773,6 +773,10 @@ void raytrace_region(Job *job)
 
                 Vec3f ray_color = raytrace_ray(job, scene, ray);
 
+                if (norm2(ray_color) > 1e4) {
+                    ray_color = scale3f(ray_color, 1e2 / norm(ray_color));
+                }
+
                 // float p_x = expf(- random_direction.x * random_direction.x / (2.0f * sigma * sigma));
                 // float p_y = expf(- random_direction.y * random_direction.y / (2.0f * sigma * sigma));
                 // ray_color = scale3f(ray_color, 1.0f / (p_x * p_y));
@@ -787,26 +791,43 @@ void raytrace_region(Job *job)
 }
 
 const    uint32_t REGION_SPLIT_SIZE = 16;
-volatile uint32_t region_count = 0;
-volatile uint32_t finished = 0;
+volatile uint32_t task_count = 0;
+volatile uint32_t task_finished = 0;
 
-void thread_entry_point(Job *job)
+typedef struct Thread_Parameters
+{
+    Scene *base_scene;
+    Image3f *images;
+} Thread_Parameters;
+
+void thread_entry_point(Thread_Parameters *param)
 {
     for (;;) {
-        uint32_t region = __sync_fetch_and_add(&region_count, 1);
+        uint32_t task_id = __sync_fetch_and_add(&task_count, 1);
 
-        if (region >= REGION_SPLIT_SIZE * REGION_SPLIT_SIZE) return;
+        if (task_id >= REGION_SPLIT_SIZE * REGION_SPLIT_SIZE * IMAGE_COUNT) return;
+
+        uint32_t image_id = task_id / (REGION_SPLIT_SIZE * REGION_SPLIT_SIZE);
+        uint32_t region = task_id % (REGION_SPLIT_SIZE * REGION_SPLIT_SIZE);
 
         uint32_t x = region % REGION_SPLIT_SIZE;
         uint32_t y = region / REGION_SPLIT_SIZE;
 
-        job->region.point.x = x * job->region.size.x;
-        job->region.point.y = y * job->region.size.y;
+        Job job = {
+            .scene = param->base_scene,
+            .image = param->images + image_id,
+            .region.point.x = x * (IMAGE_SIZE / REGION_SPLIT_SIZE),
+            .region.point.y = y * (IMAGE_SIZE / REGION_SPLIT_SIZE),
+            .region.size.x = IMAGE_SIZE / REGION_SPLIT_SIZE,
+            .region.size.y = IMAGE_SIZE / REGION_SPLIT_SIZE,
+            .ray_per_pixel = RAY_PER_PIXEL,
+            .serie = create_random_serie(),
+        };
 
-        raytrace_region(job);
+        raytrace_region(&job);
 
-        uint32_t finished_regions = __sync_fetch_and_add(&finished, 1);
-        printf("Finished %d regions out of %d.\n", finished_regions+1, REGION_SPLIT_SIZE * REGION_SPLIT_SIZE);
+        uint32_t finished_regions = __sync_fetch_and_add(&task_finished, 1);
+        printf("Finished %d regions out of %d.\n", finished_regions+1, REGION_SPLIT_SIZE * REGION_SPLIT_SIZE * IMAGE_COUNT);
     }
 }
 
@@ -855,9 +876,10 @@ int main()
 
     Image3f texture = load_texture("models/Australian_Cattle_Dog_v1_L3.123c9c6a5764-399b-4e86-9897-6bcb08b5e8ed/Australian_Cattle_Dog_dif.jpg");
 
-    int width = 512, height = 512;
-
-    Image3f dest_image = create_blank_image(width, height);
+    Image3f *images = malloc(sizeof(Image3f) * IMAGE_COUNT);
+    for (int i = 0; i < IMAGE_COUNT; i++) {
+        images[i] = create_blank_image(IMAGE_SIZE, IMAGE_SIZE);
+    }
 
     Material materials[] = {
         {   // The sphere in the center of the scene.
@@ -963,7 +985,7 @@ int main()
         {
             .center = {10, 17, 75},
             .radius = 2.0f,
-            .color = {1, 0.1, 0.1},
+            .color = {1, 0.2, 0.1},
             .albedo = 1e4f,
         },
     };
@@ -995,8 +1017,6 @@ int main()
         },
     };
     
-    
-
     Scene scene = {
         .camera = {
             .position = {0.0f, 10.0f, 85.0f},
@@ -1022,58 +1042,31 @@ int main()
     };
 
     if (USE_THREADS) {
-        pthread_t threads[16] = {};
-        Job jobs[16] = {};
+        pthread_t threads[THREAD_COUNT] = {};
+        Thread_Parameters parameters = {
+            .base_scene = &scene,
+            .images = images,
+        };
 
-        uint32_t block_width = width / 4;
-        uint32_t block_height = height / 4;
+        for (int i = 0; i < THREAD_COUNT; i++) {
 
-#if 0
-        for (int i = 0; i < 4; i++) {
-            for (int j = 0; j < 4; j++) {
-                jobs[4 * i + j].scene = &scene;
-                jobs[4 * i + j].image = &dest_image;
-                jobs[4 * i + j].region = (Rect2i){
-                    .point = {i * block_width, j * block_height},
-                    .size = {block_width, block_height}
-                };
-                jobs[4 * i + j].ray_per_pixel = 64;
-                jobs[4 * i + j].serie = create_random_serie();
-
-                int code = pthread_create(&threads[4 * i + j], NULL, (void*)raytrace_region, &jobs[4 * i + j]);
-                if (0 != code) {
-                    printf("Error creating thread.\n");
-                    exit(-1);
-                }
-            }
-        }
-#else
-        for (int i = 0; i < 16; i++) {
-            jobs[i].scene = &scene;
-            jobs[i].image = &dest_image;
-            jobs[i].region.size.x = width / REGION_SPLIT_SIZE;
-            jobs[i].region.size.y = height / REGION_SPLIT_SIZE;
-            jobs[i].ray_per_pixel = 2048;
-            jobs[i].serie = create_random_serie();
-
-            int code = pthread_create(&threads[i], NULL, (void*)thread_entry_point, &jobs[i]);
+            int code = pthread_create(&threads[i], NULL, (void*)thread_entry_point, &parameters);
             if (0 != code) {
                 printf("Error creating thread.\n");
                 exit(-1);
             }
         }
-#endif
 
-        for (int i = 0; i < 16; i++) {
+        for (int i = 0; i < THREAD_COUNT; i++) {
             pthread_join(threads[i], NULL);
         }
     } else {
         Job job = {
             .scene = &scene,
-            .image = &dest_image,
+            .image = images,
             .region = {
                 .point = {0, 0},
-                .size = {width, height},
+                .size = {IMAGE_SIZE, IMAGE_SIZE},
             },
             .ray_per_pixel = 1,
             .serie = create_random_serie(),
@@ -1082,7 +1075,12 @@ int main()
         raytrace_region(&job);
     }
 
-    save_image("image.png", &dest_image);
+    for (int i = 0; i < IMAGE_COUNT; i++) {
+        char image_name[128] = {};
+        snprintf(image_name, 128, "image_%d.png", i);
+        
+        save_image(image_name, images + i);
+    }
 
     return 0;
 }

@@ -73,4 +73,11 @@ typedef struct Job
 
 #define ARRAY_SIZE(x) ((sizeof(x) / sizeof(x[0])))
 
+#define THREAD_COUNT 15
+
+#define IMAGE_COUNT 1
+
+#define IMAGE_SIZE 512
+#define RAY_PER_PIXEL 10000
+
 #endif
