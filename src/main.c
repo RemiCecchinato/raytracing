@@ -57,12 +57,6 @@ Image3f load_texture(char *filename)
             texture.pixels[texture.size.x * (texture.size.y - 1 - j) + i].b = powf(pixels[3 * (texture.size.x * j + i) + 2] / 255.0f, 2.2f);
         }
     }
-    
-    // for (uint32_t i = 0; i < pixel_count; i++) {
-    //     texture.pixels[i].r = (float)pixels[3 * i + 0] / 255.0f;
-    //     texture.pixels[i].g = (float)pixels[3 * i + 1] / 255.0f;
-    //     texture.pixels[i].b = (float)pixels[3 * i + 2] / 255.0f;
-    // }
 
     free(pixels);
     return texture;
@@ -182,6 +176,7 @@ void split_mesh_node(Mesh_Node *node, Mesh *mesh, int depth)
 
 Mesh load_mesh(char *filename)
 {
+    printf("Chargement de %s...\n", filename);
     fastObjMesh* fastMesh = fast_obj_read(filename);
     assert(fastMesh);
 
@@ -537,9 +532,15 @@ Ray_Result find_ray_hit(Scene *scene, Ray ray, float max_distance)
     return result;
 }
 
-Vec3f compute_light_contribution(Job *job, Scene *scene, Ray previous_ray, Ray_Result previous_ray_result)
+typedef struct Light_Contribution
 {
-    Vec3f total_contribution = {};
+    Vec3f color;
+    float light_hit;
+} Light_Contribution;
+
+Light_Contribution compute_light_contribution(Job *job, Scene *scene, Ray previous_ray, Ray_Result previous_ray_result)
+{
+    Light_Contribution contribution = {};
 
     for (int32_t i = 0; i < scene->light_count; i++) {
         Light *light = scene->lights + i;
@@ -594,16 +595,19 @@ Vec3f compute_light_contribution(Job *job, Scene *scene, Ray previous_ray, Ray_R
 
         float power = light->albedo / (4.0f * M_PI * norm2(light_path));
         Vec3f final_light_color = scale3f(light->color, power * scale);
-        total_contribution = add3f(total_contribution, final_light_color);
+
+        contribution.color = add3f(contribution.color, final_light_color);
+        contribution.light_hit += 1;
     }
 
-    return total_contribution;
+    return contribution;
 }
 
 Vec3f raytrace_ray(Job *job, Scene *scene, Ray ray)
 {
     Camera *camera = &scene->camera;
 
+    float light_hit_count = 0;
     Vec3f color_scale = WHITE;
     Vec3f accumulated_color = BLACK;
 
@@ -619,6 +623,8 @@ Vec3f raytrace_ray(Job *job, Scene *scene, Ray ray)
         Material *material = scene->materials + ray_result.material_id;
 
         if (ray_result.object_type == LIGHT) {
+            light_hit_count += 1;
+
             Light *light = scene->lights + ray_result.object_id;
             float dist = ray_result.t_min;
             float scale = light->albedo / (4.0f * M_PI * ray_result.t_min * ray_result.t_min);
@@ -661,7 +667,9 @@ Vec3f raytrace_ray(Job *job, Scene *scene, Ray ray)
                 ray.direction = add3f(transmited_normal, transmited_tangent);
             }
         } else { // Non transparent material.
-            Vec3f light_color = compute_light_contribution(job, scene, ray, ray_result);
+            Light_Contribution light_contribution = compute_light_contribution(job, scene, ray, ray_result);
+            Vec3f light_color = light_contribution.color;
+            light_hit_count += light_contribution.light_hit;
 
             Vec3f diffuse_color = material->diffuse_color;
             if (material->textured) {
@@ -718,7 +726,11 @@ Vec3f raytrace_ray(Job *job, Scene *scene, Ray ray)
         }
     }
 
-    return accumulated_color;
+    if (light_hit_count == 0) {
+        return BLACK;
+    }
+
+    return scale3f(accumulated_color, 1 / light_hit_count);
 }
 
 void raytrace_region(Job *job)
