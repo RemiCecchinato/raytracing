@@ -77,7 +77,7 @@ typedef struct Job
 
 #define IMAGE_COUNT 1
 
-#define IMAGE_SIZE 512
+#define IMAGE_SIZE 1024
 #define RAY_PER_PIXEL 10000
 
 #endif

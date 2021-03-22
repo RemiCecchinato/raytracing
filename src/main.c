@@ -1015,6 +1015,17 @@ int main()
                 .rotZ = {0, 0, 1},
             },
         },
+        {
+            .mesh = &dog_mesh,
+            .material_id = 7, // Chien transparent, eh ouais !
+            .transform = {
+                .position = {0, -10, 10},
+
+                .rotX = {1, 0, 0},
+                .rotY = {0, 1, 0},
+                .rotZ = {0, 0, 1},
+            },
+        },
     };
     
     Scene scene = {
