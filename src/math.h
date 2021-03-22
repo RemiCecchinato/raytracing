@@ -141,7 +141,7 @@ typedef struct Camera
     Vec3f position;
     Vec3f lookAt;
     Vec3f up;
-    float field_of_view; // in degrees
+    float field_of_view; // en degrés.
 } Camera;
 
 typedef struct Image3f
@@ -152,17 +152,17 @@ typedef struct Image3f
 
 typedef struct Material
 {
-    // reflection information
+    // Propriétés de réflexion.
     Vec3f diffuse_color;
 
     bool mirror;
     Vec3f mirror_color;
 
-    // transparancy information
+    // Propriétés de transparence.
     bool transparent;
     float n;
 
-    // texture information
+    // Propriétés de textures.
     bool textured;
     Image3f *texture;
 } Material;

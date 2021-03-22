@@ -616,8 +616,9 @@ Vec3f raytrace_ray(Job *job, Scene *scene, Ray ray)
     Vec3f color_scale = WHITE;
     Vec3f accumulated_color = BLACK;
 
-    // Keeps tracks of whether we are inside a transparent object or not.
-    // With this method it is impossible to have transparent objects intersecting.
+    // Permet de se souvenir si on est dans un objet transparent ou non.
+    // Avec ce mécanisme il n'est pas possible d'avoir plusieurs objets
+    // transparents qui s'intersectent.
     bool within_transparent_object = false;
 
     for (int ray_count = 0; ray_count < 64; ray_count++) {
@@ -659,19 +660,19 @@ Vec3f raytrace_ray(Job *job, Scene *scene, Ray ray)
             Vec3f transmited_tangent = scale3f(incident_tangent, index_ratio);
 
             if (norm2(transmited_tangent) > 1) {
-                // Incomming angle is too big, simply reflect on next ray.
+                // L'angle incident est trop grand, on réfléchit la lumière.
 
                 ray.origin = ray_result.intersection_point;
                 ray.direction = sub3f(incident_tangent, incident_normal);
             } else {
-                // Transmit the ray.
+                // L'angle incident fait que la lumière est transmise dans le milieu.
                 within_transparent_object = !within_transparent_object;
 
                 Vec3f transmited_normal = scale3f(normalize(incident_normal), sqrtf(1 - norm2(transmited_tangent)));
                 ray.origin = ray_result.intersection_point;
                 ray.direction = add3f(transmited_normal, transmited_tangent);
             }
-        } else { // Non transparent material.
+        } else { // Matériau opaque.
             Light_Contribution light_contribution = compute_light_contribution(job, scene, ray, ray_result);
             Vec3f light_color = light_contribution.color;
             light_hit_count += light_contribution.light_hit;
@@ -882,36 +883,36 @@ int main()
     }
 
     Material materials[] = {
-        {   // The sphere in the center of the scene.
+        {   // La sphère au centre de la scene.
             .diffuse_color = scale3f(WHITE, 0.5f),
             .mirror = false,
         },
-        {   // The background wall.
+        {   // Le mur du fond.
             .diffuse_color = GREEN,
             .mirror = false,
         },
-        {   // The ground.
+        {   // Le sol.
             .diffuse_color = BLUE,
             .mirror = false,
         },
-        {   // Left wall.
+        {   // Le mur de gauche.
             .diffuse_color = PINK,
             .mirror = false,
         },
-        {   // Right Wall.
+        {   // Le mur de droite.
             .diffuse_color = YELLOW,
             .mirror = false,
         },
-        {   // Perfect mirror sphere.
+        {   // Sphère miroir.
             .diffuse_color = BLACK,
             .mirror = true,
             .mirror_color = WHITE,
         },
-        {   // Ceilling.
+        {   // Le plafond.
             .diffuse_color = RED,
             .mirror = false,
         },
-        {   // Transparent sphere.
+        {   // La sphère transparente.
             .diffuse_color = BLACK,
             .mirror = false,
 
@@ -995,7 +996,7 @@ int main()
     Scene_Mesh meshes[] = {
         {
             .mesh = &dog_mesh,
-            .material_id = 5, // Chien mirror, parce que pourquoi pas ! (Cela crée plein de caustiques cependant !)
+            .material_id = 5, // Chien mirror, parce que pourquoi pas !
             .transform = {
                 .position = {-25, -10, 0},
             

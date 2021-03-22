@@ -164,7 +164,7 @@ void random_advance(Random_Serie *serie)
 Vec4f random4f_uniform(Random_Serie *serie, float min, float max)
 {
     __m128i mantissa_mask  = _mm_set1_epi32((1 << 23) - 1);
-    __m128i exponent_field = _mm_set1_epi32(127 << 23); // floats between 1 and 2
+    __m128i exponent_field = _mm_set1_epi32(127 << 23);
 
     float scale1 = max - min;
     float step1 = -max + 2 * min;
@@ -172,7 +172,6 @@ Vec4f random4f_uniform(Random_Serie *serie, float min, float max)
     __m128 scale = _mm_load1_ps(&scale1);
     __m128 step  = _mm_load1_ps(&step1);
 
-    // The generated floats
     union {
         __m128i xmmi;
         __m128  xmmf;
